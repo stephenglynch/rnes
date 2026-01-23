@@ -21,11 +21,11 @@ bitflags! {
 }
 
 pub struct INes {
-    prg_rom: Vec<u8>,
-    mapper: u16,
-    submapper: u8,
-    trainer: Option<Vec<u8>>,
-    chr_rom: Option<Vec<u8>>,
+    pub prg_rom: Vec<u8>,
+    pub mapper: u16,
+    pub submapper: u8,
+    pub trainer: Option<Vec<u8>>,
+    pub chr_rom: Option<Vec<u8>>,
 }
 
 pub fn read_ines(filename: &str) -> Option<INes> {
