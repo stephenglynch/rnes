@@ -1,6 +1,5 @@
 use bitflags::bitflags;
-use crate::address_modes::{*};
-use crate::instructions::{*};
+use crate::instructions::execute;
 
 bitflags! {
     /// Represents a set of flags.
@@ -104,13 +103,7 @@ impl Cpu {
     pub fn run(&mut self) {
         let pc = self.registers.pc;
         let next_instruction = self.mmu_load(pc);
-        (match next_instruction {
-            0x4c => jmp::<Absolute>,
-            0x6c => add::<Immediate>,
-            0x6d => add::<Absolute>,
-            0x78 => sei,
-            _ => panic!()
-        })(self);
+        execute(self, next_instruction);
         self.registers.pc += 1;
     }
 }

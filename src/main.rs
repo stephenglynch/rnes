@@ -1,6 +1,5 @@
 mod parse_ines;
 mod execute_prg;
-mod address_modes;
 mod instructions;
 mod system;
 
