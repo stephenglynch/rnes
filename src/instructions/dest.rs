@@ -1,3 +1,4 @@
+use crate::system;
 use crate::system::Cpu;
 use super::address_modes::*;
 
@@ -30,6 +31,13 @@ pub struct StackPointer;
 impl <A: AddrMode> Dest<A> for StackPointer {
     fn set(sys: &mut Cpu, val: u8) {
         sys.registers.sp = val;
+    }
+}
+
+pub struct StatusRegister;
+impl <A: AddrMode> Dest<A> for StatusRegister {
+    fn set(sys: &mut Cpu, val: u8) {
+        sys.registers.sr = system::StatusRegister::from_bits_retain(val);
     }
 }
 

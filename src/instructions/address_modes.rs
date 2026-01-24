@@ -18,8 +18,9 @@ impl AddrMode for Implied {
 
 pub struct Immediate;
 impl AddrMode for Immediate {
-    fn get_addr(_sys: &Cpu) -> u16 {
-        panic!()
+    fn get_addr(sys: &Cpu) -> u16 {
+        let pc = sys.registers.pc;
+        pc + 1
     }
 
     fn size() -> u16 {

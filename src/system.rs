@@ -104,6 +104,5 @@ impl Cpu {
         let pc = self.registers.pc;
         let next_instruction = self.mmu_load(pc);
         execute(self, next_instruction);
-        self.registers.pc += 1;
     }
 }

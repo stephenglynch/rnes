@@ -41,6 +41,7 @@ impl <A: AddrMode> Source<A> for StatusRegister {
 }
 
 pub struct Memory;
+
 impl <A: AddrMode> Source<A> for Memory {
     fn  get(sys: &Cpu) -> u8 {
         let addr = A::get_addr(sys);
