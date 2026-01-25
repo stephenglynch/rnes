@@ -71,8 +71,8 @@ impl Cpu {
         let prog_rom_len = self.prg_rom.len();
         match addr {
             0x0000..0x2000 => (Memory::Ram, addr as usize & 0xfff),
-            0x2000..0x4000 => unimplemented!("Not implemented PPU!"),
-            0x4000..0x401f => unimplemented!("Not implemented APU!"),
+            0x2000..0x4000 => unimplemented!("Not implemented PPU! (0x{:04x})", addr),
+            0x4000..0x401f => unimplemented!("Not implemented APU! (0x{:04x})", addr),
             0x401f..0x6000 => panic!("Unused - what behaviour should occur here?"),
             0x6000..0x8000 => (Memory::PrgRam, addr as usize & 0xfff),
             0x8000..0xc000 => (Memory::PrgRom, addr as usize & 0x3fff),
