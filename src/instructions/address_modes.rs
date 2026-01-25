@@ -34,7 +34,7 @@ impl AddrMode for Absolute {
         let pc  = sys.registers.pc;
         let addr_lo = sys.mmu_load(pc + 1) as u16;
         let addr_hi = sys.mmu_load(pc + 2) as u16;
-        addr_lo | (addr_hi >> 8)
+        addr_lo | (addr_hi << 8)
     }
 
     fn size() -> u16 {
@@ -61,7 +61,7 @@ impl AddrMode for IndexedX {
         let x = sys.registers.x as u16;
         let addr_lo = sys.mmu_load(pc + 1) as u16;
         let addr_hi = sys.mmu_load(pc + 2) as u16;
-        (addr_lo | (addr_hi >> 8)) + x
+        (addr_lo | (addr_hi << 8)) + x
     }
 
     fn size() -> u16 {
@@ -76,7 +76,7 @@ impl AddrMode for IndexedY {
         let y = sys.registers.y as u16;
         let addr_lo = sys.mmu_load(pc + 1) as u16;
         let addr_hi = sys.mmu_load(pc + 2) as u16;
-        (addr_lo | (addr_hi >> 8)) + y
+        (addr_lo | (addr_hi << 8)) + y
     }
 
     fn size() -> u16 {
@@ -118,10 +118,10 @@ impl AddrMode for Indirect {
         let pc  = sys.registers.pc;
         let indirect_addr_lo = sys.mmu_load(pc + 1) as u16;
         let indirect_addr_hi = sys.mmu_load(pc + 2) as u16;
-        let indirect_addr = indirect_addr_lo | (indirect_addr_hi >> 8);
+        let indirect_addr = indirect_addr_lo | (indirect_addr_hi << 8);
         let addr_lo = sys.mmu_load(indirect_addr) as u16;
         let addr_hi = sys.mmu_load(indirect_addr + 1) as u16;
-        addr_lo | (addr_hi >> 8)
+        addr_lo | (addr_hi << 8)
     }
 
     fn size() -> u16 {
@@ -138,7 +138,7 @@ impl AddrMode for PreIndexed {
         let indirect_addr = (indirect_addr_lo + x) as u16;
         let addr_lo = sys.mmu_load(indirect_addr) as u16;
         let addr_hi = sys.mmu_load(indirect_addr + 1) as u16;
-        addr_lo | (addr_hi >> 8)
+        addr_lo | (addr_hi << 8)
     }
 
     fn size() -> u16 {
@@ -154,7 +154,7 @@ impl AddrMode for PostIndexed {
         let indirect_addr = sys.mmu_load(pc + 1) as u16;
         let addr_lo: u8 = sys.mmu_load(indirect_addr);
         let addr_hi = sys.mmu_load(indirect_addr + 1);
-        addr_lo as u16 | (addr_hi as u16 >> 8) + y as u16
+        (addr_lo as u16 | ((addr_hi as u16) << 8)) + y as u16
     }
 
     fn size() -> u16 {
