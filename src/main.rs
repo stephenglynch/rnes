@@ -2,6 +2,7 @@ mod parse_ines;
 mod execute_prg;
 mod instructions;
 mod system;
+mod ppu;
 
 fn main() {
     println!("Hello, world!");

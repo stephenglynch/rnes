@@ -1,5 +1,6 @@
 use bitflags::bitflags;
 use crate::instructions::execute;
+use crate::ppu::Ppu;
 
 bitflags! {
     /// Represents a set of flags.
@@ -35,15 +36,15 @@ enum Memory {
     Ram,
     PrgRom,
     PrgRam,
-    ChrRom,
+    PpuRegs,
 }
 
 pub struct Cpu {
     pub registers: Registers,
     ram: Vec<u8>,
     prg_rom: Vec<u8>,
-    chr_rom: Vec<u8>,
-    prg_ram: Vec<u8>
+    prg_ram: Vec<u8>,
+    ppu: Ppu
 }
 
 impl Cpu {
@@ -52,8 +53,8 @@ impl Cpu {
             registers: Registers::new(),
             ram: vec![0; 2048],
             prg_rom: prg_rom,
-            chr_rom: chr_rom,
-            prg_ram: vec![0; 2048]
+            prg_ram: vec![0; 2048],
+            ppu: Ppu::new(chr_rom)
         };
         cpu.reset();
         cpu
@@ -69,15 +70,16 @@ impl Cpu {
 
     fn mmu_resolve(&self, addr: u16) -> (Memory, usize) {
         let prog_rom_len = self.prg_rom.len();
-        match addr {
-            0x0000..0x2000 => (Memory::Ram, addr as usize & 0xfff),
-            0x2000..0x4000 => unimplemented!("Not implemented PPU! (0x{:04x})", addr),
+        let (mem, loc) = match addr {
+            0x0000..0x2000 => (Memory::Ram, addr & 0xfff),
+            0x2000..0x4000 => (Memory::PpuRegs, addr & 0x0007),
             0x4000..0x401f => unimplemented!("Not implemented APU! (0x{:04x})", addr),
             0x401f..0x6000 => panic!("Unused - what behaviour should occur here?"),
-            0x6000..0x8000 => (Memory::PrgRam, addr as usize & 0xfff),
-            0x8000..0xc000 => (Memory::PrgRom, addr as usize & 0x3fff),
-            0xc000..=0xffff=> (Memory::PrgRom, prog_rom_len - 0x4000 + addr as usize & 0x3fff)
-        }
+            0x6000..0x8000 => (Memory::PrgRam, addr & 0xfff),
+            0x8000..0xc000 => (Memory::PrgRom, addr & 0x3fff),
+            0xc000..=0xffff=> (Memory::PrgRom, prog_rom_len as u16 - 0x4000 + addr & 0x3fff)
+        };
+        (mem, loc as usize)
     }
 
     pub fn mmu_load(&self, addr: u16) -> u8 {
@@ -86,7 +88,7 @@ impl Cpu {
             Memory::Ram => self.ram[loc],
             Memory::PrgRam => self.prg_ram[loc],
             Memory::PrgRom => self.prg_rom[loc],
-            _ => unreachable!("Unexpected memory")
+            Memory::PpuRegs => self.ppu.get_reg(loc)
         }
     }
 
@@ -96,7 +98,7 @@ impl Cpu {
             Memory::Ram => self.ram[loc] = val,
             Memory::PrgRam => self.prg_ram[loc] = val,
             Memory::PrgRom => self.prg_rom[loc] = val,
-            _ => unreachable!("Unexpected memory")
+            Memory::PpuRegs => self.ppu.set_reg(loc, val)
         }
     }
 

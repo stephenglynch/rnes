@@ -1,0 +1,95 @@
+use bitflags::bitflags;
+
+bitflags! {
+    /// Represents a set of flags.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    struct PpuCtrl: u8 {
+        const NAME_TABLE_0 = (1 << 0);
+        const NAME_TABLE_1 = (1 << 1);
+        const VRAM_INCR = (1 << 2);
+        const SPRITE_TILE_SEL = (1 << 3);
+        const BACKGROUND_EN = (1 << 4);
+        const SPRITE_HEIGHT = (1 << 5);
+        const PPU_MASTER_SLAVE = (1 << 6);
+        const NMI_EN = (1 << 7);
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    struct PpuMask: u8 {
+        const GREY_SCALE = (1 << 0);
+        const SHOW_BACKGROUND = (1 << 1);
+        const SHOW_SPRITES = (1 << 2);
+        const RENDER_BACKGROUND = (1 << 3);
+        const RENDER_SPRITES = (1 << 4);
+        const EMPHASIZE_RED = (1 << 5);
+        const EMPHASIZE_GREEN = (1 << 6);
+        const EMPHASIZE_BLUE = (1 << 7);
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    struct PpuStatus: u8 {
+        const SPRITE_OVERFLOW = (1 << 5);
+        const SPRITE_0_HIT = (1 << 6);
+        const VBLANK = (1 << 7);
+    }
+}
+
+pub struct Ppu {
+    ppu_ctrl: PpuCtrl,
+    ppu_mask: PpuMask,
+    ppu_status: PpuStatus,
+    oam_addr: u8,
+    oam_data: u8,
+    ppu_scroll_x: u8,
+    ppu_scroll_y: u8,
+    ppu_addr: u16,
+    write_toggle: bool,
+    chr_rom: Vec<u8>
+}
+
+impl Ppu {
+    pub fn new(chr_rom: Vec<u8>) -> Self {
+        Self {
+            //TODO: To be more accurate these should initialise to random values
+            ppu_ctrl: PpuCtrl::from_bits_retain(0),
+            ppu_mask: PpuMask::from_bits_retain(0),
+            ppu_status: PpuStatus::from_bits_retain(0),
+            oam_addr: 0,
+            oam_data: 0,
+            ppu_scroll_x: 0,
+            ppu_scroll_y: 0,
+            ppu_addr: 0,
+            write_toggle: false,
+            chr_rom: chr_rom
+        }
+    }
+
+    pub fn set_reg(&mut self, addr: usize, val: u8) {
+        match addr {
+            0 => self.ppu_ctrl = PpuCtrl::from_bits_retain(val),
+            1 => self.ppu_mask = PpuMask::from_bits_retain(val),
+            2 => (),
+            3 => self.oam_addr = val,
+            4 => self.oam_data = val,
+            5 => if !self.write_toggle { self.ppu_scroll_x = val } else { self.ppu_scroll_y = val },
+            6 => self.ppu_addr = if !self.write_toggle { (val as u16) << 8 } else { val as u16 },
+            7 => self.chr_rom[self.ppu_addr as usize] = val,
+            _ => unreachable!()
+        }
+    }
+
+    pub fn get_reg(&self, addr: usize) -> u8 {
+        match addr {
+            0 => 0,
+            1 => 0,
+            2 => self.ppu_status.bits(),
+            3 => 0,
+            4 => self.oam_data,
+            5 => 0,
+            6 => 0,
+            7 => self.chr_rom[self.ppu_addr as usize],
+            _ => unreachable!()
+        }
+    }
+
+}
