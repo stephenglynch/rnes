@@ -389,8 +389,16 @@ fn brk(_sys: &mut Cpu) {
     unimplemented!();
 }
 
-fn rti(_sys: &mut Cpu) {
-    unimplemented!();
+fn rti(sys: &mut Cpu) {
+    let mut sr = sys.registers.sr.bits();
+    let flags = pull_raw(sys);
+    sr |= flags & StatusRegister::STANDARD_FLAGS.bits();
+    sr &= !(!flags & StatusRegister::STANDARD_FLAGS.bits());
+    let ret_addr_lo = pull_raw(sys) as u16;
+    let ret_addr_hi = pull_raw(sys) as u16;
+    let ret_addr = ret_addr_lo | (ret_addr_hi << 8);
+    sys.registers.sr = StatusRegister::from_bits_retain(sr);
+    sys.registers.pc = ret_addr;
 }
 
 pub fn execute(sys: &mut Cpu, instruction: u8) {
