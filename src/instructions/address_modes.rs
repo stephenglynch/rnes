@@ -76,7 +76,7 @@ impl AddrMode for IndexedY {
         let y = sys.registers.y as u16;
         let addr_lo = sys.mmu_load(pc + 1) as u16;
         let addr_hi = sys.mmu_load(pc + 2) as u16;
-        (addr_lo | (addr_hi << 8)) + y
+        (addr_lo | (addr_hi << 8)).wrapping_add(y)
     }
 
     fn size() -> u16 {
@@ -89,8 +89,9 @@ impl AddrMode for ZPIndexedX {
     fn get_addr(sys: &Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let x = sys.registers.x;
-        let addr_base = sys.mmu_load(pc + 1);
-        (addr_base + x) as u16
+        let mut addr_base = sys.mmu_load(pc + 1);
+        addr_base = addr_base.wrapping_add(x);
+        addr_base as u16
     }
 
     fn size() -> u16 {
@@ -103,8 +104,9 @@ impl AddrMode for ZPIndexedY {
     fn get_addr(sys: &Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let y = sys.registers.y;
-        let addr_base = sys.mmu_load(pc + 1);
-        (addr_base + y) as u16
+        let mut addr_base = sys.mmu_load(pc + 1);
+        addr_base = addr_base.wrapping_add(y);
+        addr_base as u16
     }
 
     fn size() -> u16 {
@@ -116,11 +118,13 @@ pub struct Indirect;
 impl AddrMode for Indirect {
     fn get_addr(sys: &Cpu) -> u16 {
         let pc  = sys.registers.pc;
-        let indirect_addr_lo = sys.mmu_load(pc + 1) as u16;
+        let mut indirect_addr_lo = sys.mmu_load(pc + 1) as u8;
         let indirect_addr_hi = sys.mmu_load(pc + 2) as u16;
-        let indirect_addr = indirect_addr_lo | (indirect_addr_hi << 8);
-        let addr_lo = sys.mmu_load(indirect_addr) as u16;
-        let addr_hi = sys.mmu_load(indirect_addr + 1) as u16;
+        // Note we have to simulate a bug when incrementing the low byte past
+        // 0xff does not carry into the high byte
+        let addr_lo = sys.mmu_load(indirect_addr_lo as u16 | (indirect_addr_hi << 8)) as u16;
+        indirect_addr_lo = indirect_addr_lo.wrapping_add(1);
+        let addr_hi = sys.mmu_load(indirect_addr_lo as u16 | (indirect_addr_hi << 8)) as u16;
         addr_lo | (addr_hi << 8)
     }
 
@@ -154,7 +158,7 @@ impl AddrMode for PostIndexed {
         let indirect_addr = sys.mmu_load(pc + 1) as u16;
         let addr_lo: u8 = sys.mmu_load(indirect_addr);
         let addr_hi = sys.mmu_load(indirect_addr + 1);
-        (addr_lo as u16 | ((addr_hi as u16) << 8)) + y as u16
+        (addr_lo as u16 | ((addr_hi as u16) << 8)).wrapping_add(y as u16)
     }
 
     fn size() -> u16 {
