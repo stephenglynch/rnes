@@ -14,6 +14,8 @@ bitflags! {
         const IGNORED = (1 << 5);
         const OVERFLOW = (1 << 6);
         const NEGATIVE = (1 << 7);
+        const STANDARD_FLAGS = 0b11001111;
+        const UNUSED_FLAGS = !Self::STANDARD_FLAGS.bits();
     }
 }
 
@@ -28,7 +30,8 @@ pub struct Registers {
 
 impl Registers {
     fn new() -> Self {
-        Registers { pc: 0, ac: 0, x: 0, y: 0, sp: 0, sr: StatusRegister::INTERRUPT }
+        let sr = StatusRegister::INTERRUPT | StatusRegister::IGNORED;
+        Registers { pc: 0, ac: 0, x: 0, y: 0, sp: 0, sr: sr }
     }
 }
 
@@ -62,9 +65,10 @@ impl Cpu {
 
     fn reset(&mut self) {
         // Resolve reset vector
-        let pc_lo = self.mmu_load(0xfffc) as u16;
-        let pc_hi = self.mmu_load(0xfffd) as u16;
-        self.registers.pc = pc_lo | (pc_hi << 8);
+        // let pc_lo = self.mmu_load(0xfffc) as u16;
+        // let pc_hi = self.mmu_load(0xfffd) as u16;
+        // self.registers.pc = pc_lo | (pc_hi << 8);
+        self.registers.pc = 0xc000;
         self.registers.sp = self.registers.sp.wrapping_sub(3);
     }
 
@@ -104,6 +108,13 @@ impl Cpu {
 
     pub fn run(&mut self) {
         let pc = self.registers.pc;
+        let a = self.registers.ac;
+        let x = self.registers.x;
+        let y = self.registers.y;
+        let p = self.registers.sr.bits();
+        let sp = self.registers.sp;
+        println!("{:04x}     A: {:02x} X: {:02x} Y: {:02x} P: {:02x} SP = {:02x}",
+            pc, a, x, y, p, sp);
         let next_instruction = self.mmu_load(pc);
         execute(self, next_instruction);
     }

@@ -13,6 +13,14 @@ fn bump_pc<A: AddrMode>(sys: &mut Cpu) {
     sys.registers.pc += A::size();
 }
 
+fn update_zero_status(sys: &mut Cpu, val: u8) {
+    sys.registers.sr.set(StatusRegister::ZERO, val == 0);
+}
+
+fn update_negative_status(sys: &mut Cpu, val: u8) {
+    sys.registers.sr.set(StatusRegister::NEGATIVE, val & 0x80 != 0);
+}
+
 // Nop
 
 fn nop(sys: &mut Cpu) {
@@ -22,7 +30,10 @@ fn nop(sys: &mut Cpu) {
 // Transfer operations
 
 fn load<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
-    D::set(sys, S::get(sys));
+    let val = S::get(sys);
+    D::set(sys, val);
+    update_zero_status(sys, val);
+    update_negative_status(sys, val);
     bump_pc::<A>(sys);
 }
 
@@ -32,7 +43,10 @@ fn store<A: AddrMode, D: Dest<A>, S: Source>(sys: &mut Cpu) {
 }
 
 fn trans<D: Dest, S: Source>(sys: &mut Cpu) {
-    D::set(sys, S::get(sys));
+    let val = S::get(sys);
+    D::set(sys, val);
+    update_zero_status(sys, val);
+    update_negative_status(sys, val);
     bump_pc::<Implied>(sys);
 }
 
@@ -44,39 +58,55 @@ fn push_raw(sys: &mut Cpu, val: u8) {
     sys.registers.sp -= 1;
 }
 
-fn push<S: Source>(sys: &mut Cpu) {
-    let val = S::get(sys);
-    push_raw(sys, val);
+fn php(sys: &mut Cpu) {
+    let p = sys.registers.sr | StatusRegister::BREAK | StatusRegister::IGNORED;
+    push_raw(sys, p.bits());
+    bump_pc::<Implied>(sys);
+}
+
+fn pha(sys: &mut Cpu) {
+    push_raw(sys, sys.registers.ac);
     bump_pc::<Implied>(sys);
 }
 
 fn pull_raw(sys: &mut Cpu) -> u8 {
-    let sp = sys.registers.sp as u16;
     sys.registers.sp += 1;
-    sys.mmu_load(0x0100 + sp)
+    sys.mmu_load(0x0100 + sys.registers.sp as u16)
 }
 
-fn pull<D: Dest>(sys: &mut Cpu) {
+fn pla(sys: &mut Cpu) {
     let val = pull_raw(sys);
-    D::set(sys, val);
+    update_zero_status(sys, val);
+    update_negative_status(sys, val);
+    sys.registers.ac = val;
+    bump_pc::<Implied>(sys);
+}
+
+fn plp(sys: &mut Cpu) {
+    let val = pull_raw(sys);
+    let sr = sys.registers.sr.bits();
+    sys.registers.sr = StatusRegister::from_bits_retain(
+        val & StatusRegister::STANDARD_FLAGS.bits() |
+        sr & StatusRegister::UNUSED_FLAGS.bits()
+    );
     bump_pc::<Implied>(sys);
 }
 
 // Increment/Decrements
 
 fn incr<A: AddrMode, D: Dest, S: Source>(sys: &mut Cpu) {
-    let val= S::get(sys).wrapping_add(1);
-    sys.registers.sr.set(StatusRegister::NEGATIVE, val & 0x80 != 0);
-    sys.registers.sr.set(StatusRegister::ZERO, val == 0);
-    D::set(sys, val);
+    let result= S::get(sys).wrapping_add(1);
+    update_zero_status(sys, result);
+    update_negative_status(sys, result);
+    D::set(sys, result);
     bump_pc::<A>(sys);
 }
 
 fn decr<A: AddrMode, D: Dest, S: Source>(sys: &mut Cpu) {
-    let val = S::get(sys).wrapping_sub(1);
-    sys.registers.sr.set(StatusRegister::NEGATIVE, val & 0x80 != 0);
-    sys.registers.sr.set(StatusRegister::ZERO, val == 0);
-    D::set(sys, val);
+    let result = S::get(sys).wrapping_sub(1);
+    update_zero_status(sys, result);
+    update_negative_status(sys, result);
+    D::set(sys, result);
     bump_pc::<A>(sys);
 }
 
@@ -89,10 +119,10 @@ fn adc<A: AddrMode, S: Source<A>>(sys: &mut Cpu) {
     let total = ac + val + carry;
     let overflow = (total ^ ac) & (total ^ val) & 0x80 != 0;
     sys.registers.sr.set(StatusRegister::CARRY, total & 0x100 != 0);
-    sys.registers.sr.set(StatusRegister::ZERO, total == 0);
-    sys.registers.sr.set(StatusRegister::NEGATIVE, total & 0x80 != 0);
     sys.registers.sr.set(StatusRegister::OVERFLOW, overflow);
-    sys.registers.ac = val as u8;
+    update_zero_status(sys, total as u8);
+    update_negative_status(sys, total as u8);
+    sys.registers.ac = total as u8;
     bump_pc::<A>(sys);
 }
 
@@ -100,13 +130,13 @@ fn sbc<A: AddrMode, S: Source<A>>(sys: &mut Cpu) {
     let val = S::get(sys) as i16;
     let carry = sys.registers.sr.contains(StatusRegister::CARRY) as i16;
     let ac = sys.registers.ac as i16;
-    let total = ac + val + carry;
+    let total = ac - val - carry;
     let overflow = (total ^ ac) & (total ^ !val) & 0x80 != 0;
     sys.registers.sr.set(StatusRegister::CARRY, total & 0x100 != 0);
-    sys.registers.sr.set(StatusRegister::ZERO, total == 0);
-    sys.registers.sr.set(StatusRegister::NEGATIVE, total & 0x80 != 0);
     sys.registers.sr.set(StatusRegister::OVERFLOW, overflow);
-    sys.registers.ac = val as u8;
+    update_zero_status(sys, total as u8);
+    update_negative_status(sys, total as u8);
+    sys.registers.ac = total as u8;
     bump_pc::<A>(sys);
 }
 
@@ -115,8 +145,8 @@ fn sbc<A: AddrMode, S: Source<A>>(sys: &mut Cpu) {
 fn and<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let val = S::get(sys);
     let result = val & sys.registers.ac;
-    sys.registers.sr.set(StatusRegister::ZERO, result == 0);
-    sys.registers.sr.set(StatusRegister::NEGATIVE, result & 0x80 != 0);
+    update_zero_status(sys, result);
+    update_negative_status(sys, result);
     D::set(sys, result);
     bump_pc::<A>(sys);
 }
@@ -124,8 +154,8 @@ fn and<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
 fn eor<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let val = S::get(sys);
     let result = val ^ sys.registers.ac;
-    sys.registers.sr.set(StatusRegister::ZERO, result == 0);
-    sys.registers.sr.set(StatusRegister::NEGATIVE, result & 0x80 != 0);
+    update_zero_status(sys, result);
+    update_negative_status(sys, result);
     D::set(sys, result);
     bump_pc::<A>(sys);
 }
@@ -133,8 +163,8 @@ fn eor<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
 fn or<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let val = S::get(sys);
     let result = val | sys.registers.ac;
-    sys.registers.sr.set(StatusRegister::ZERO, result == 0);
-    sys.registers.sr.set(StatusRegister::NEGATIVE, result & 0x80 != 0);
+    update_zero_status(sys, result);
+    update_negative_status(sys, result);
     D::set(sys, result);
     bump_pc::<A>(sys);
 }
@@ -145,8 +175,8 @@ fn asl<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let val = S::get(sys);
     let result = val << 1;
     let carry = val & 0x80 != 0;
-    sys.registers.sr.set(StatusRegister::ZERO, result == 0);
-    sys.registers.sr.set(StatusRegister::NEGATIVE, result & 0x80 != 0);
+    update_zero_status(sys, result);
+    update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, carry);
     D::set(sys, result as u8);
     bump_pc::<A>(sys);
@@ -156,8 +186,8 @@ fn lsr<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let val = S::get(sys);
     let result = val >> 1;
     let carry = val & 0x01 != 0;
-    sys.registers.sr.set(StatusRegister::ZERO, result == 0);
-    sys.registers.sr.set(StatusRegister::NEGATIVE, result & 0x80 != 0);
+    update_zero_status(sys, result);
+    update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, carry);
     D::set(sys, result as u8);
     bump_pc::<A>(sys);
@@ -169,8 +199,8 @@ fn rol<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let new_carry = val & 0x80 != 0;
     let mut result = val << 1;
     result |= old_carry;
-    sys.registers.sr.set(StatusRegister::ZERO, result == 0);
-    sys.registers.sr.set(StatusRegister::NEGATIVE, result & 0x80 != 0);
+    update_zero_status(sys, result);
+    update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, new_carry);
     D::set(sys, result as u8);
     bump_pc::<A>(sys);
@@ -182,8 +212,8 @@ fn ror<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let new_carry = val & 0x01 != 0;
     let mut result = val >> 1;
     result |= old_carry;
-    sys.registers.sr.set(StatusRegister::ZERO, result == 0);
-    sys.registers.sr.set(StatusRegister::NEGATIVE, result & 0x80 != 0);
+    update_zero_status(sys, result);
+    update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, new_carry);
     D::set(sys, result as u8);
     bump_pc::<A>(sys);
@@ -232,11 +262,11 @@ fn cp<A: AddrMode, R: Source<A>, S: Source<A>>(sys: &mut Cpu) {
     let reg = R::get(sys);
     let operand = S::get(sys);
     match reg.cmp(&operand) {
-        Ordering::Equal => {
+        Ordering::Less => {
             sys.registers.sr.set(StatusRegister::ZERO, false);
             sys.registers.sr.set(StatusRegister::CARRY, false);
         },
-        Ordering::Less => {
+        Ordering::Equal => {
             sys.registers.sr.set(StatusRegister::ZERO, true);
             sys.registers.sr.set(StatusRegister::CARRY, true);
         },
@@ -245,6 +275,7 @@ fn cp<A: AddrMode, R: Source<A>, S: Source<A>>(sys: &mut Cpu) {
             sys.registers.sr.set(StatusRegister::CARRY, true);
         }
     }
+    update_negative_status(sys, reg.wrapping_sub(operand));
     bump_pc::<A>(sys);
 }
 
@@ -332,7 +363,6 @@ fn bvs<A: AddrMode>(sys: &mut Cpu) {
 fn jmp<A: AddrMode>(sys: &mut Cpu) {
     let dest = A::get_addr(sys);
     sys.registers.pc = dest;
-    bump_pc::<A>(sys);
 }
 
 fn jsr<A: AddrMode>(sys: &mut Cpu) {
@@ -343,7 +373,6 @@ fn jsr<A: AddrMode>(sys: &mut Cpu) {
     push_raw(sys, ret_addr_hi);
     push_raw(sys, ret_addr_lo);
     sys.registers.pc = dest;
-    bump_pc::<A>(sys);
 }
 
 fn rts(sys: &mut Cpu) {
@@ -370,7 +399,7 @@ pub fn execute(sys: &mut Cpu, instruction: u8) {
         0x01 => or::<PreIndexed, dest::Accumulator, source::Memory>,
         0x05 => or::<ZeroPage, dest::Accumulator, source::Memory>,
         0x06 => asl::<ZeroPage, dest::Memory, source::Memory>,
-        0x08 => push::<source::StatusRegister>,
+        0x08 => php,
         0x09 => or::<Immediate, dest::Accumulator, source::Memory>,
         0x0A => asl::<Implied, dest::Accumulator, source::Accumulator>,
         0x0D => or::<Absolute, dest::Accumulator, source::Memory>,
@@ -388,7 +417,7 @@ pub fn execute(sys: &mut Cpu, instruction: u8) {
         0x24 => bit::<ZeroPage, source::Memory>,
         0x25 => and::<ZeroPage, dest::Accumulator, source::Memory>,
         0x26 => rol::<ZeroPage, dest::Memory, source::Memory>,
-        0x28 => pull::<dest::StatusRegister>,
+        0x28 => plp,
         0x29 => and::<Immediate, dest::Accumulator, source::Memory>,
         0x2A => rol::<Implied, dest::Accumulator, source::Accumulator>,
         0x2C => bit::<Absolute, source::Memory>,
@@ -406,7 +435,7 @@ pub fn execute(sys: &mut Cpu, instruction: u8) {
         0x41 => eor::<PreIndexed, dest::Accumulator, source::Memory>,
         0x45 => eor::<ZeroPage, dest::Accumulator, source::Memory>,
         0x46 => lsr::<ZeroPage, dest::Memory, source::Memory>,
-        0x48 => push::<source::Accumulator>,
+        0x48 => pha,
         0x49 => eor::<Immediate, dest::Accumulator, source::Memory>,
         0x4A => lsr::<Implied, dest::Accumulator, source::Accumulator>,
         0x4C => jmp::<Absolute>,
@@ -424,7 +453,7 @@ pub fn execute(sys: &mut Cpu, instruction: u8) {
         0x61 => adc::<PreIndexed, source::Memory>,
         0x65 => adc::<ZeroPage, source::Memory>,
         0x66 => ror::<ZeroPage, dest::Memory, source::Memory>,
-        0x68 => pull::<dest::Accumulator>,
+        0x68 => pla,
         0x69 => adc::<Immediate, source::Memory>,
         0x6A => ror::<Implied, dest::Accumulator, source::Accumulator>,
         0x6C => jmp::<Indirect>,
