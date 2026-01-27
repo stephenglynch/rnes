@@ -86,7 +86,7 @@ impl Cpu {
         (mem, loc as usize)
     }
 
-    pub fn mmu_load(&self, addr: u16) -> u8 {
+    pub fn mmu_load(&mut self, addr: u16) -> u8 {
         let (mem, loc) = self.mmu_resolve(addr);
         match mem {
             Memory::Ram => self.ram[loc],

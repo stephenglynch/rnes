@@ -38,7 +38,8 @@ fn load<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
 }
 
 fn store<A: AddrMode, D: Dest<A>, S: Source>(sys: &mut Cpu) {
-    D::set(sys, S::get(sys));
+    let val = S::get(sys);
+    D::set(sys, val);
     bump_pc::<A>(sys);
 }
 

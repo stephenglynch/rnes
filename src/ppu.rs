@@ -64,6 +64,27 @@ impl Ppu {
         }
     }
 
+    fn vram_increment(&mut self) {
+        self.ppu_addr = self.ppu_addr.wrapping_add(
+            if self.ppu_ctrl.contains(PpuCtrl::VRAM_INCR) {
+                32
+            } else {
+                1
+            }
+        );
+    }
+
+    fn write_vram(&mut self, val: u8) {
+        self.chr_rom[self.ppu_addr as usize] = val;
+        self.vram_increment();
+    }
+
+    fn read_vram(&mut self) -> u8 {
+        let val = self.chr_rom[self.ppu_addr as usize];
+        self.vram_increment();
+        val
+    }
+
     pub fn set_reg(&mut self, addr: usize, val: u8) {
         match addr {
             0 => self.ppu_ctrl = PpuCtrl::from_bits_retain(val),
@@ -73,12 +94,12 @@ impl Ppu {
             4 => self.oam_data = val,
             5 => if !self.write_toggle { self.ppu_scroll_x = val } else { self.ppu_scroll_y = val },
             6 => self.ppu_addr = if !self.write_toggle { (val as u16) << 8 } else { val as u16 },
-            7 => self.chr_rom[self.ppu_addr as usize] = val,
+            7 => self.write_vram(val),
             _ => unreachable!()
         }
     }
 
-    pub fn get_reg(&self, addr: usize) -> u8 {
+    pub fn get_reg(&mut self, addr: usize) -> u8 {
         match addr {
             0 => 0,
             1 => 0,
@@ -87,7 +108,7 @@ impl Ppu {
             4 => self.oam_data,
             5 => 0,
             6 => 0,
-            7 => self.chr_rom[self.ppu_addr as usize],
+            7 => self.read_vram(),
             _ => unreachable!()
         }
     }

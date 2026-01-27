@@ -1,13 +1,13 @@
 use crate::system::{*};
 
 pub trait AddrMode {
-    fn get_addr(sys: &Cpu) -> u16;
+    fn get_addr(sys: &mut Cpu) -> u16;
     fn size() -> u16;
 }
 
 pub struct Implied;
 impl AddrMode for Implied {
-    fn get_addr(_sys: &Cpu) -> u16 {
+    fn get_addr(_sys: &mut Cpu) -> u16 {
         panic!()
     }
 
@@ -18,7 +18,7 @@ impl AddrMode for Implied {
 
 pub struct Immediate;
 impl AddrMode for Immediate {
-    fn get_addr(sys: &Cpu) -> u16 {
+    fn get_addr(sys: &mut Cpu) -> u16 {
         let pc = sys.registers.pc;
         pc + 1
     }
@@ -30,7 +30,7 @@ impl AddrMode for Immediate {
 
 pub struct Absolute;
 impl AddrMode for Absolute {
-    fn get_addr(sys: &Cpu) -> u16 {
+    fn get_addr(sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let addr_lo = sys.mmu_load(pc + 1) as u16;
         let addr_hi = sys.mmu_load(pc + 2) as u16;
@@ -44,7 +44,7 @@ impl AddrMode for Absolute {
 
 pub struct ZeroPage;
 impl AddrMode for ZeroPage {
-    fn get_addr(sys: &Cpu) -> u16 {
+    fn get_addr(sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         sys.mmu_load(pc + 1) as u16
     }
@@ -56,7 +56,7 @@ impl AddrMode for ZeroPage {
 
 pub struct IndexedX;
 impl AddrMode for IndexedX {
-    fn get_addr(sys: &Cpu) -> u16 {
+    fn get_addr(sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let x = sys.registers.x as u16;
         let addr_lo = sys.mmu_load(pc + 1) as u16;
@@ -71,7 +71,7 @@ impl AddrMode for IndexedX {
 
 pub struct IndexedY;
 impl AddrMode for IndexedY {
-    fn get_addr(sys: &Cpu) -> u16 {
+    fn get_addr(sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let y = sys.registers.y as u16;
         let addr_lo = sys.mmu_load(pc + 1) as u16;
@@ -86,7 +86,7 @@ impl AddrMode for IndexedY {
 
 pub struct ZPIndexedX;
 impl AddrMode for ZPIndexedX {
-    fn get_addr(sys: &Cpu) -> u16 {
+    fn get_addr(sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let x = sys.registers.x;
         let mut addr_base = sys.mmu_load(pc + 1);
@@ -101,7 +101,7 @@ impl AddrMode for ZPIndexedX {
 
 pub struct ZPIndexedY;
 impl AddrMode for ZPIndexedY {
-    fn get_addr(sys: &Cpu) -> u16 {
+    fn get_addr(sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let y = sys.registers.y;
         let mut addr_base = sys.mmu_load(pc + 1);
@@ -116,7 +116,7 @@ impl AddrMode for ZPIndexedY {
 
 pub struct Indirect;
 impl AddrMode for Indirect {
-    fn get_addr(sys: &Cpu) -> u16 {
+    fn get_addr(sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let mut indirect_addr_lo = sys.mmu_load(pc + 1) as u8;
         let indirect_addr_hi = sys.mmu_load(pc + 2) as u16;
@@ -135,7 +135,7 @@ impl AddrMode for Indirect {
 
 pub struct PreIndexed;
 impl AddrMode for PreIndexed {
-    fn get_addr(sys: &Cpu) -> u16 {
+    fn get_addr(sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let x = sys.registers.x;
         let indirect_addr_lo = sys.mmu_load(pc + 1);
@@ -152,7 +152,7 @@ impl AddrMode for PreIndexed {
 
 pub struct PostIndexed;
 impl AddrMode for PostIndexed {
-    fn get_addr(sys: &Cpu) -> u16 {
+    fn get_addr(sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let y = sys.registers.y;
         let indirect_addr = sys.mmu_load(pc + 1) as u16;
@@ -168,7 +168,7 @@ impl AddrMode for PostIndexed {
 
 pub struct Relative;
 impl AddrMode for Relative {
-    fn get_addr(sys: &Cpu) -> u16 {
+    fn get_addr(sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         pc + sys.mmu_load(pc + 1) as u16
     }
