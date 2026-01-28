@@ -85,6 +85,11 @@ impl Ppu {
         val
     }
 
+    fn read_ppu_status(&mut self) -> u8 {
+        self.write_toggle = false;
+        self.ppu_status.bits()
+    }
+
     pub fn set_reg(&mut self, addr: usize, val: u8) {
         match addr {
             0 => self.ppu_ctrl = PpuCtrl::from_bits_retain(val),
@@ -103,7 +108,7 @@ impl Ppu {
         match addr {
             0 => 0,
             1 => 0,
-            2 => self.ppu_status.bits(),
+            2 => self.read_ppu_status(),
             3 => 0,
             4 => self.oam_data,
             5 => 0,
