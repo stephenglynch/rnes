@@ -39,12 +39,12 @@ pub struct Ppu {
     ppu_mask: PpuMask,
     ppu_status: PpuStatus,
     oam_addr: u8,
-    oam_data: u8,
     ppu_scroll_x: u8,
     ppu_scroll_y: u8,
     ppu_addr: u16,
     write_toggle: bool,
-    chr_rom: Vec<u8>
+    chr_rom: Vec<u8>,
+    oam_data: Vec<u8>
 }
 
 impl Ppu {
@@ -96,7 +96,7 @@ impl Ppu {
             1 => self.ppu_mask = PpuMask::from_bits_retain(val),
             2 => (),
             3 => self.oam_addr = val,
-            4 => self.oam_data = val,
+            4 => self.write_oam(val),
             5 => if !self.write_toggle { self.ppu_scroll_x = val } else { self.ppu_scroll_y = val },
             6 => self.ppu_addr = if !self.write_toggle { (val as u16) << 8 } else { val as u16 },
             7 => self.write_vram(val),
@@ -110,7 +110,7 @@ impl Ppu {
             1 => 0,
             2 => self.read_ppu_status(),
             3 => 0,
-            4 => self.oam_data,
+            4 => self.read_oam(),
             5 => 0,
             6 => 0,
             7 => self.read_vram(),
@@ -118,4 +118,12 @@ impl Ppu {
         }
     }
 
+    fn read_oam(&self) -> u8 {
+        self.oam_data[self.oam_addr as usize]
+    }
+
+    pub fn write_oam(&mut self, val: u8) {
+        self.oam_data[self.oam_addr as usize] = val;
+        self.oam_addr = self.oam_addr.wrapping_add(1);
+    }
 }
