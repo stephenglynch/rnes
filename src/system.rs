@@ -1,6 +1,7 @@
 use bitflags::bitflags;
 use crate::instructions::execute;
 use crate::ppu::Ppu;
+use crate::apu::Apu;
 
 bitflags! {
     /// Represents a set of flags.
@@ -40,6 +41,7 @@ enum Memory {
     PrgRom,
     PrgRam,
     Oam,
+    ApuRegs,
     PpuRegs,
 }
 
@@ -48,6 +50,7 @@ pub struct Cpu {
     ram: Vec<u8>,
     prg_rom: Vec<u8>,
     prg_ram: Vec<u8>,
+    apu: Apu,
     ppu: Ppu
 }
 
@@ -58,6 +61,7 @@ impl Cpu {
             ram: vec![0; 2048],
             prg_rom: prg_rom,
             prg_ram: vec![0; 2048],
+            apu: Apu::new(),
             ppu: Ppu::new(chr_rom)
         };
         cpu.reset();
@@ -79,6 +83,7 @@ impl Cpu {
             0x0000..0x2000 => (Memory::Ram, addr & 0xfff),
             0x2000..0x4000 => (Memory::PpuRegs, addr & 0x0007),
             0x4014         => (Memory::Oam, 0),
+            0x4000..0x401f => (Memory::ApuRegs, addr & 0x00ff),
             0x401f..0x6000 => panic!("Unused - what behaviour should occur here?"),
             0x6000..0x8000 => (Memory::PrgRam, addr & 0xfff),
             0x8000..0xc000 => (Memory::PrgRom, addr & 0x3fff),
@@ -93,6 +98,8 @@ impl Cpu {
             Memory::Ram => self.ram[loc],
             Memory::PrgRam => self.prg_ram[loc],
             Memory::PrgRom => self.prg_rom[loc],
+            Memory::ApuRegs => 0,
+            Memory::PpuRegs => self.ppu.get_reg(loc),
             Memory::Oam => 0,
         }
     }
@@ -103,6 +110,8 @@ impl Cpu {
             Memory::Ram => self.ram[loc] = val,
             Memory::PrgRam => self.prg_ram[loc] = val,
             Memory::PrgRom => self.prg_rom[loc] = val,
+            Memory::ApuRegs => (),
+            Memory::PpuRegs => self.ppu.set_reg(loc, val),
             Memory::Oam => self.oam_transfer(val)
         }
     }
