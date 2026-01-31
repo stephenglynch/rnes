@@ -1,7 +1,10 @@
+use std::rc::Rc;
+use std::cell::RefCell;
 use bitflags::bitflags;
 use crate::instructions::execute;
 use crate::ppu::Ppu;
 use crate::apu::Apu;
+use crate::clock::Clock;
 
 bitflags! {
     /// Represents a set of flags.
@@ -47,6 +50,7 @@ enum Memory {
 
 pub struct Cpu {
     pub registers: Registers,
+    pub clock: Rc<RefCell<Clock>>,
     ram: Vec<u8>,
     prg_rom: Vec<u8>,
     prg_ram: Vec<u8>,
@@ -55,8 +59,9 @@ pub struct Cpu {
 }
 
 impl Cpu {
-    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>) -> Self {
+    pub fn new(clock: Rc<RefCell<Clock>>, prg_rom: Vec<u8>, chr_rom: Vec<u8>) -> Self {
         let mut cpu = Cpu {
+            clock: clock,
             registers: Registers::new(),
             ram: vec![0; 2048],
             prg_rom: prg_rom,
@@ -126,16 +131,18 @@ impl Cpu {
         }
     }
 
-    pub fn run(&mut self) {
-        let pc = self.registers.pc;
-        let a = self.registers.ac;
-        let x = self.registers.x;
-        let y = self.registers.y;
-        let p = self.registers.sr.bits();
-        let sp = self.registers.sp;
-        println!("{:04x}     A: {:02x} X: {:02x} Y: {:02x} P: {:02x} SP = {:02x}",
-            pc, a, x, y, p, sp);
-        let next_instruction = self.mmu_load(pc);
-        execute(self, next_instruction);
+    pub async fn run(mut self) {
+        loop {
+            let pc = self.registers.pc;
+            let a = self.registers.ac;
+            let x = self.registers.x;
+            let y = self.registers.y;
+            let p = self.registers.sr.bits();
+            let sp = self.registers.sp;
+            println!("{:04x}     A: {:02x} X: {:02x} Y: {:02x} P: {:02x} SP = {:02x}",
+                pc, a, x, y, p, sp);
+            let next_instruction = self.mmu_load(pc);
+            execute(&mut self, next_instruction).await;
+        }
     }
 }

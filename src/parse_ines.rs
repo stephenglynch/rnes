@@ -51,7 +51,7 @@ pub fn read_ines(filename: &str) -> Option<INes> {
         Option::None
     };
 
-    let prg_rom_size_lsb = (raw[4] as usize);
+    let prg_rom_size_lsb = raw[4] as usize;
     let prg_rom_size_msb = if nes2 {
         ((raw[9] & 0x0f) as usize) << 8
     } else {
@@ -62,7 +62,7 @@ pub fn read_ines(filename: &str) -> Option<INes> {
     let prg_rom_end = prg_rom_start + prg_rom_size;
     let prg_rom = raw[prg_rom_start..prg_rom_end].to_vec();
 
-    let chr_rom_size_lsb = (raw[5] as usize);
+    let chr_rom_size_lsb = raw[5] as usize;
     let chr_rom_size_msb = if nes2 {
         (raw[9] & 0xf0) as usize
     } else {
