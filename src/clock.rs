@@ -1,0 +1,66 @@
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::cell::RefCell;
+use std::task::{Waker, Context, Poll};
+use std::future::Future;
+use std::pin::Pin;
+
+use futures::stream::Cycle;
+
+pub struct Clock {
+    pub current_cycle: u64,
+    // Tasks waiting for a specific cycle to pass
+    sleepers: BTreeMap<u64, Vec<Waker>>,
+}
+
+impl Clock {
+    pub fn new() -> Self {
+        Clock {
+            current_cycle: 0,
+            sleepers: BTreeMap::new()
+        }
+    }
+
+    pub fn tick(&mut self) {
+        self.current_cycle += 1;
+        // Wake up everyone waiting for this specific cycle
+        if let Some(wakers) = self.sleepers.remove(&self.current_cycle) {
+            for waker in wakers {
+                waker.wake();
+            }
+        }
+    }
+}
+
+pub struct CycleDelay {
+    clock: Rc<RefCell<Clock>>,
+    until: u64,
+}
+
+impl CycleDelay {
+    pub fn new(clock: Rc<RefCell<Clock>>, until: u64) -> Self {
+        CycleDelay {
+            clock: clock,
+            until: until,
+        }
+    }
+}
+
+impl Future for CycleDelay {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut clock = self.clock.borrow_mut();
+        if clock.current_cycle >= self.until {
+            Poll::Ready(())
+        } else {
+            // Register the current task's waker to be called later
+            clock.sleepers
+                .entry(self.until)
+                .or_default()
+                .push(cx.waker().clone());
+            Poll::Pending
+        }
+    }
+}
