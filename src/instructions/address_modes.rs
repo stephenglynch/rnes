@@ -243,10 +243,9 @@ impl AddrMode for PreIndexed {
     fn get_addr(&mut self, sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let x = sys.registers.x;
-        let indirect_addr_lo = sys.mmu_load(pc + 1);
-        let indirect_addr = (indirect_addr_lo + x) as u16;
-        let addr_lo = sys.mmu_load(indirect_addr) as u16;
-        let addr_hi = sys.mmu_load(indirect_addr + 1) as u16;
+        let indirect_addr = sys.mmu_load(pc + 1).wrapping_add(x);
+        let addr_lo = sys.mmu_load(indirect_addr as u16) as u16;
+        let addr_hi = sys.mmu_load(indirect_addr.wrapping_add(1) as u16) as u16;
         addr_lo | (addr_hi << 8)
     }
 
@@ -272,9 +271,9 @@ impl AddrMode for PostIndexed {
     fn get_addr(&mut self, sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
         let y = sys.registers.y;
-        let indirect_addr = sys.mmu_load(pc + 1) as u16;
-        let addr_lo: u8 = sys.mmu_load(indirect_addr);
-        let addr_hi = sys.mmu_load(indirect_addr + 1);
+        let indirect_addr = sys.mmu_load(pc + 1);
+        let addr_lo = sys.mmu_load(indirect_addr as u16);
+        let addr_hi = sys.mmu_load(indirect_addr.wrapping_add(1) as u16);
         let addr = addr_lo as u16 | ((addr_hi as u16) << 8);
         let indexed_addr = (addr).wrapping_add(y as u16);
         self.page_crossed = (addr & 0xff00) ^ (indexed_addr & 0xff00) != 0;
