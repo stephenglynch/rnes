@@ -305,7 +305,7 @@ pub struct Relative {
 impl AddrMode for Relative {
     fn get_addr(&mut self, sys: &mut Cpu) -> u16 {
         let pc  = sys.registers.pc;
-        let dest = pc.wrapping_add(sys.mmu_load(pc + 1) as u16);
+        let dest = pc.wrapping_add(((sys.mmu_load(pc + 1) as i8) as i16) as u16);
         self.page_crossed = (pc & 0xff00) ^ (dest & 0xff00) != 0;
         dest
     }
