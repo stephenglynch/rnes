@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 
 use crate::system::{Cpu, StatusRegister};
+use crate::clock::CycleDelay;
 
 mod address_modes;
 mod dest;
@@ -9,7 +10,13 @@ use address_modes::*;
 use dest::Dest;
 use source::Source;
 
-fn bump_pc<A: AddrMode>(sys: &mut Cpu) {
+macro_rules! cycles {
+    ($sys:expr, $n:expr) => {
+        CycleDelay::new($sys.clock.clone(), $n).await;
+    }
+}
+
+fn bump_pc<A: AddrMode + Default>(sys: &mut Cpu) {
     sys.registers.pc += A::size();
 }
 
@@ -25,35 +32,48 @@ fn update_negative_status(sys: &mut Cpu, val: u8) {
 
 async fn nop(sys: &mut Cpu) {
     bump_pc::<Implied>(sys);
+    cycles!(sys, 2);
 }
 
 // Transfer operations
 
-async fn load<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
-    let val = S::get(sys);
-    D::set(sys, val);
+async fn load<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = S::get(sys, &mut addr_mode);
+    D::set(sys, &mut addr_mode, val);
     update_zero_status(sys, val);
     update_negative_status(sys, val);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read));
 }
 
-async fn store<A: AddrMode, D: Dest<A>, S: Source>(sys: &mut Cpu) {
-    let val = S::get(sys);
-    D::set(sys, val);
+async fn store<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = S::get(sys, &mut addr_mode);
+    D::set(sys, &mut addr_mode, val);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Write));
 }
 
 async fn trans<D: Dest, S: Source>(sys: &mut Cpu) {
-    let val = S::get(sys);
-    D::set(sys, val);
+    let mut addr_mode = Immediate::default();
+    let val = S::get(sys, &mut addr_mode);
+    D::set(sys, &mut addr_mode, val);
     update_zero_status(sys, val);
     update_negative_status(sys, val);
     bump_pc::<Implied>(sys);
+    cycles!(sys, 2);
+}
+
+async fn txs(sys: &mut Cpu) {
+    sys.registers.sp = sys.registers.x;
+    bump_pc::<Implied>(sys);
+    cycles!(sys, 2);
 }
 
 // Stack operations
 
-async fn push_raw(sys: &mut Cpu, val: u8) {
+fn push_raw(sys: &mut Cpu, val: u8) {
     let sp = sys.registers.sp as u16;
     sys.mmu_store(0x0100 + sp, val);
     sys.registers.sp -= 1;
@@ -63,11 +83,13 @@ async fn php(sys: &mut Cpu) {
     let p = sys.registers.sr | StatusRegister::BREAK | StatusRegister::IGNORED;
     push_raw(sys, p.bits());
     bump_pc::<Implied>(sys);
+    cycles!(sys, 3);
 }
 
 async fn pha(sys: &mut Cpu) {
     push_raw(sys, sys.registers.ac);
     bump_pc::<Implied>(sys);
+    cycles!(sys, 3);
 }
 
 fn pull_raw(sys: &mut Cpu) -> u8 {
@@ -81,6 +103,7 @@ async fn pla(sys: &mut Cpu) {
     update_negative_status(sys, val);
     sys.registers.ac = val;
     bump_pc::<Implied>(sys);
+    cycles!(sys, 4);
 }
 
 async fn plp(sys: &mut Cpu) {
@@ -91,30 +114,36 @@ async fn plp(sys: &mut Cpu) {
         sr & StatusRegister::UNUSED_FLAGS.bits()
     );
     bump_pc::<Implied>(sys);
+    cycles!(sys, 4);
 }
 
 // Increment/Decrements
 
-async fn incr<A: AddrMode, D: Dest, S: Source>(sys: &mut Cpu) {
-    let result= S::get(sys).wrapping_add(1);
+async fn incr<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let result= S::get(sys, &mut addr_mode).wrapping_add(1);
     update_zero_status(sys, result);
     update_negative_status(sys, result);
-    D::set(sys, result);
+    D::set(sys, &mut addr_mode, result);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
 
-async fn decr<A: AddrMode, D: Dest, S: Source>(sys: &mut Cpu) {
-    let result = S::get(sys).wrapping_sub(1);
+async fn decr<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let result = S::get(sys, &mut addr_mode).wrapping_sub(1);
     update_zero_status(sys, result);
     update_negative_status(sys, result);
-    D::set(sys, result);
+    D::set(sys, &mut addr_mode, result);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
 
 // Math
 
-async fn adc<A: AddrMode, S: Source<A>>(sys: &mut Cpu) {
-    let val = S::get(sys) as u16;
+async fn adc<A: AddrMode + Default, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = S::get(sys, &mut addr_mode) as u16;
     let carry = sys.registers.sr.contains(StatusRegister::CARRY) as u16;
     let ac = sys.registers.ac as u16;
     let total = ac + val + carry;
@@ -125,77 +154,91 @@ async fn adc<A: AddrMode, S: Source<A>>(sys: &mut Cpu) {
     update_negative_status(sys, total as u8);
     sys.registers.ac = total as u8;
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read));
 }
 
-async fn sbc<A: AddrMode, S: Source<A>>(sys: &mut Cpu) {
-    let val = S::get(sys) as i16;
-    let carry = sys.registers.sr.contains(StatusRegister::CARRY) as i16;
+async fn sbc<A: AddrMode + Default, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = S::get(sys, &mut addr_mode) as i16;
+    let carry = !sys.registers.sr.contains(StatusRegister::CARRY) as i16;
     let ac = sys.registers.ac as i16;
     let total = ac - val - carry;
     let overflow = (total ^ ac) & (total ^ !val) & 0x80 != 0;
-    sys.registers.sr.set(StatusRegister::CARRY, total & 0x100 != 0);
+    sys.registers.sr.set(StatusRegister::CARRY, total & 0x100 == 0);
     sys.registers.sr.set(StatusRegister::OVERFLOW, overflow);
     update_zero_status(sys, total as u8);
     update_negative_status(sys, total as u8);
     sys.registers.ac = total as u8;
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read));
 }
 
 // Logical
 
-async fn and<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
-    let val = S::get(sys);
+async fn and<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = S::get(sys, &mut addr_mode);
     let result = val & sys.registers.ac;
     update_zero_status(sys, result);
     update_negative_status(sys, result);
-    D::set(sys, result);
+    D::set(sys, &mut addr_mode, result);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read));
 }
 
-async fn eor<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
-    let val = S::get(sys);
+async fn eor<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = S::get(sys, &mut addr_mode);
     let result = val ^ sys.registers.ac;
     update_zero_status(sys, result);
     update_negative_status(sys, result);
-    D::set(sys, result);
+    D::set(sys, &mut addr_mode, result);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read));
 }
 
-async fn or<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
-    let val = S::get(sys);
+async fn or<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = S::get(sys, &mut addr_mode);
     let result = val | sys.registers.ac;
     update_zero_status(sys, result);
     update_negative_status(sys, result);
-    D::set(sys, result);
+    D::set(sys, &mut addr_mode, result);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read));
 }
 
 // Shift
 
-async fn asl<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
-    let val = S::get(sys);
+async fn asl<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = S::get(sys, &mut addr_mode);
     let result = val << 1;
     let carry = val & 0x80 != 0;
     update_zero_status(sys, result);
     update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, carry);
-    D::set(sys, result as u8);
+    D::set(sys, &mut addr_mode, result as u8);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
 
-async fn lsr<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
-    let val = S::get(sys);
+async fn lsr<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = S::get(sys, &mut addr_mode);
     let result = val >> 1;
     let carry = val & 0x01 != 0;
     update_zero_status(sys, result);
     update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, carry);
-    D::set(sys, result as u8);
+    D::set(sys, &mut addr_mode, result as u8);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
 
-async fn rol<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
-    let val = S::get(sys);
+async fn rol<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = S::get(sys, &mut addr_mode);
     let old_carry = sys.registers.sr.contains(StatusRegister::CARRY) as u8;
     let new_carry = val & 0x80 != 0;
     let mut result = val << 1;
@@ -203,12 +246,14 @@ async fn rol<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     update_zero_status(sys, result);
     update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, new_carry);
-    D::set(sys, result as u8);
+    D::set(sys, &mut addr_mode, result as u8);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
 
-async fn ror<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
-    let val = S::get(sys);
+async fn ror<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = S::get(sys, &mut addr_mode);
     let old_carry = if sys.registers.sr.contains(StatusRegister::CARRY) {0x80} else {0x00};
     let new_carry = val & 0x01 != 0;
     let mut result = val >> 1;
@@ -216,8 +261,9 @@ async fn ror<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     update_zero_status(sys, result);
     update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, new_carry);
-    D::set(sys, result as u8);
+    D::set(sys, &mut addr_mode, result as u8);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
 
 // Flags
@@ -225,43 +271,51 @@ async fn ror<A: AddrMode, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
 async fn clc(sys: &mut Cpu) {
     sys.registers.sr.set(StatusRegister::CARRY, false);
     bump_pc::<Implied>(sys);
+    cycles!(sys, 2);
 }
 
 async fn cld(sys: &mut Cpu) {
     sys.registers.sr.set(StatusRegister::DECIMAL, false);
     bump_pc::<Implied>(sys);
+    cycles!(sys, 2);
 }
 
 async fn cli(sys: &mut Cpu) {
     sys.registers.sr.set(StatusRegister::INTERRUPT, false);
     bump_pc::<Implied>(sys);
+    cycles!(sys, 2);
 }
 
 async fn clv(sys: &mut Cpu) {
     sys.registers.sr.set(StatusRegister::OVERFLOW, false);
     bump_pc::<Implied>(sys);
+    cycles!(sys, 2);
 }
 
 async fn sec(sys: &mut Cpu) {
     sys.registers.sr.set(StatusRegister::CARRY, true);
     bump_pc::<Implied>(sys);
+    cycles!(sys, 2);
 }
 
 async fn sed(sys: &mut Cpu) {
     sys.registers.sr.set(StatusRegister::DECIMAL, true);
     bump_pc::<Implied>(sys);
+    cycles!(sys, 2);
 }
 
 async fn sei(sys: &mut Cpu) {
     sys.registers.sr.set(StatusRegister::INTERRUPT, true);
     bump_pc::<Implied>(sys);
+    cycles!(sys, 2);
 }
 
 // Compare
 
-async fn cp<A: AddrMode, R: Source<A>, S: Source<A>>(sys: &mut Cpu) {
-    let reg = R::get(sys);
-    let operand = S::get(sys);
+async fn cp<A: AddrMode + Default, R: Source<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let reg = R::get(sys, &mut addr_mode);
+    let operand = S::get(sys, &mut addr_mode);
     match reg.cmp(&operand) {
         Ordering::Less => {
             sys.registers.sr.set(StatusRegister::ZERO, false);
@@ -278,102 +332,140 @@ async fn cp<A: AddrMode, R: Source<A>, S: Source<A>>(sys: &mut Cpu) {
     }
     update_negative_status(sys, reg.wrapping_sub(operand));
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read));
 }
 
 // Bit Test
 
-async fn bit<A: AddrMode, S: Source<A>>(sys: &mut Cpu) {
+async fn bit<A: AddrMode + Default, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
     let reg = sys.registers.ac;
-    let operand = S::get(sys);
+    let operand = S::get(sys, &mut addr_mode);
     let result = reg & operand;
     sys.registers.sr.set(StatusRegister::ZERO, result == 0);
     sys.registers.sr.set(StatusRegister::OVERFLOW, operand & (1 << 6) != 0);
     sys.registers.sr.set(StatusRegister::NEGATIVE, operand & (1 << 7) != 0);
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read));
 }
 
 // Conditional branching
 
-async fn bcc<A: AddrMode>(sys: &mut Cpu) {
+async fn bcc<A: AddrMode + Default>(sys: &mut Cpu) {
     let test_bit = !sys.registers.sr.contains(StatusRegister::CARRY);
-    let dest = A::get_addr(sys);
+    let mut addr_mode = A::default();
+    let dest = addr_mode.get_addr(sys);
     if test_bit {
         sys.registers.pc = dest;
     }
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read) + test_bit as u64);
 }
-async fn bcs<A: AddrMode>(sys: &mut Cpu) {
+
+async fn bcs<A: AddrMode + Default>(sys: &mut Cpu) {
     let test_bit = sys.registers.sr.contains(StatusRegister::CARRY);
-    let dest = A::get_addr(sys);
+    let mut addr_mode = A::default();
+    let dest = addr_mode.get_addr(sys);
     if test_bit {
         sys.registers.pc = dest;
     }
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read) + test_bit as u64);
 }
-async fn beq<A: AddrMode>(sys: &mut Cpu) {
+
+async fn beq<A: AddrMode + Default>(sys: &mut Cpu) {
     let test_bit = sys.registers.sr.contains(StatusRegister::ZERO);
-    let dest = A::get_addr(sys);
+    let mut addr_mode = A::default();
+    let dest = addr_mode.get_addr(sys);
     if test_bit {
         sys.registers.pc = dest;
     }
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read) + test_bit as u64);
 }
-async fn bmi<A: AddrMode>(sys: &mut Cpu) {
+
+async fn bmi<A: AddrMode + Default>(sys: &mut Cpu) {
     let test_bit = sys.registers.sr.contains(StatusRegister::NEGATIVE);
-    let dest = A::get_addr(sys);
+    let mut addr_mode = A::default();
+    let dest = addr_mode.get_addr(sys);
     if test_bit {
         sys.registers.pc = dest;
     }
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read) + test_bit as u64);
 }
-async fn bne<A: AddrMode>(sys: &mut Cpu) {
+
+async fn bne<A: AddrMode + Default>(sys: &mut Cpu) {
     let test_bit = !sys.registers.sr.contains(StatusRegister::ZERO);
-    let dest = A::get_addr(sys);
+    let mut addr_mode = A::default();
+    let dest = addr_mode.get_addr(sys);
+    let mut extra_cycles = 0;
     if test_bit {
         sys.registers.pc = dest;
+        extra_cycles = 1 + addr_mode.page_crossed() as u64;
     }
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read) + extra_cycles);
 }
-async fn bpl<A: AddrMode>(sys: &mut Cpu) {
+
+async fn bpl<A: AddrMode + Default>(sys: &mut Cpu) {
     let test_bit = !sys.registers.sr.contains(StatusRegister::NEGATIVE);
-    let dest = A::get_addr(sys);
+    let mut addr_mode = A::default();
+    let dest = addr_mode.get_addr(sys);
+    let mut extra_cycles = 0;
     if test_bit {
         sys.registers.pc = dest;
+        extra_cycles = 1 + addr_mode.page_crossed() as u64;
     }
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read) + extra_cycles);
 }
-async fn bvc<A: AddrMode>(sys: &mut Cpu) {
+
+async fn bvc<A: AddrMode + Default>(sys: &mut Cpu) {
     let test_bit = !sys.registers.sr.contains(StatusRegister::OVERFLOW);
-    let dest = A::get_addr(sys);
+    let mut addr_mode = A::default();
+    let dest = addr_mode.get_addr(sys);
+    let mut extra_cycles = 0;
     if test_bit {
         sys.registers.pc = dest;
+        extra_cycles = 1 + addr_mode.page_crossed() as u64;
     }
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read) + extra_cycles);
 }
-async fn bvs<A: AddrMode>(sys: &mut Cpu) {
+
+async fn bvs<A: AddrMode + Default>(sys: &mut Cpu) {
     let test_bit = sys.registers.sr.contains(StatusRegister::OVERFLOW);
-    let dest = A::get_addr(sys);
+    let mut addr_mode = A::default();
+    let dest = addr_mode.get_addr(sys);
+    let mut extra_cycles = 0;
     if test_bit {
         sys.registers.pc = dest;
+        extra_cycles = 1 + addr_mode.page_crossed() as u64;
     }
     bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::Read) + extra_cycles);
 }
 
 // Jumps and subroutines
 
-async fn jmp<A: AddrMode>(sys: &mut Cpu) {
-    let dest = A::get_addr(sys);
+async fn jmp<A: AddrMode + Default>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let dest = addr_mode.get_addr(sys);
     sys.registers.pc = dest;
+    cycles!(sys, addr_mode.cycles(AccessType::Jump));
 }
 
-async fn jsr<A: AddrMode>(sys: &mut Cpu) {
-    let dest = A::get_addr(sys);
+async fn jsr<A: AddrMode + Default>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let dest = addr_mode.get_addr(sys);
     let ret_addr = sys.registers.pc + 2;
     let ret_addr_hi = ((ret_addr & 0xff00) >> 8) as u8;
     let ret_addr_lo = ret_addr as u8;
     push_raw(sys, ret_addr_hi);
     push_raw(sys, ret_addr_lo);
     sys.registers.pc = dest;
+    cycles!(sys, 6);
 }
 
 async fn rts(sys: &mut Cpu) {
@@ -382,6 +474,7 @@ async fn rts(sys: &mut Cpu) {
     let ret_addr = ret_addr_lo | (ret_addr_hi << 8);
     sys.registers.pc = ret_addr;
     bump_pc::<Implied>(sys);
+    cycles!(sys, 6);
 }
 
 // Interrupts
@@ -400,6 +493,7 @@ async fn rti(sys: &mut Cpu) {
     let ret_addr = ret_addr_lo | (ret_addr_hi << 8);
     sys.registers.sr = StatusRegister::from_bits_retain(sr);
     sys.registers.pc = ret_addr;
+    cycles!(sys, 6);
 }
 
 pub async fn execute(sys: &mut Cpu, instruction: u8) {
@@ -492,7 +586,7 @@ pub async fn execute(sys: &mut Cpu, instruction: u8) {
         0x96 => store::<ZPIndexedY, dest::Memory, source::IndexX>(sys).await,
         0x98 => trans::<dest::Accumulator, source::IndexY>(sys).await,
         0x99 => store::<IndexedY, dest::Memory, source::Accumulator>(sys).await,
-        0x9A => trans::<dest::StackPointer, source::IndexX>(sys).await,
+        0x9A => txs(sys).await,
         0x9D => store::<IndexedX, dest::Memory, source::Accumulator>(sys).await,
         0xA0 => load::<Immediate, dest::IndexY, source::Memory>(sys).await,
         0xA1 => load::<PreIndexed, dest::Accumulator, source::Memory>(sys).await,

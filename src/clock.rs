@@ -1,12 +1,9 @@
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::task::{Waker, Context, Poll};
 use std::future::Future;
 use std::pin::Pin;
-
-use futures::stream::Cycle;
 
 pub struct Clock {
     pub current_cycle: u64,
@@ -17,7 +14,7 @@ pub struct Clock {
 impl Clock {
     pub fn new() -> Self {
         Clock {
-            current_cycle: 0,
+            current_cycle: 7,
             sleepers: BTreeMap::new()
         }
     }
@@ -40,9 +37,10 @@ pub struct CycleDelay {
 
 impl CycleDelay {
     pub fn new(clock: Rc<RefCell<Clock>>, until: u64) -> Self {
+        let current_cycle = clock.borrow().current_cycle;
         CycleDelay {
             clock: clock,
-            until: until,
+            until: current_cycle + until,
         }
     }
 }

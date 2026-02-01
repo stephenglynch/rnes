@@ -55,7 +55,7 @@ impl Ppu {
             ppu_mask: PpuMask::from_bits_retain(0),
             ppu_status: PpuStatus::from_bits_retain(0),
             oam_addr: 0,
-            oam_data: 0,
+            oam_data: Vec::new(), // TODO change this, just needed to compile
             ppu_scroll_x: 0,
             ppu_scroll_y: 0,
             ppu_addr: 0,
