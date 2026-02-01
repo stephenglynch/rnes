@@ -14,7 +14,7 @@ pub struct Clock {
 impl Clock {
     pub fn new() -> Self {
         Clock {
-            current_cycle: 7,
+            current_cycle: 3 * 7, // The starting cycle number for thge CPU
             sleepers: BTreeMap::new()
         }
     }

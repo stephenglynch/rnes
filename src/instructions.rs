@@ -10,9 +10,10 @@ use address_modes::*;
 use dest::Dest;
 use source::Source;
 
+// Awaits a certain number of CPU clocks cycles (3x PPU cycles)
 macro_rules! cycles {
     ($sys:expr, $n:expr) => {
-        CycleDelay::new($sys.clock.clone(), $n).await;
+        CycleDelay::new($sys.clock.clone(), $n * 3).await;
     }
 }
 

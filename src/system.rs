@@ -139,7 +139,7 @@ impl Cpu {
             let y = self.registers.y;
             let p = self.registers.sr.bits();
             let sp = self.registers.sp;
-            let cycle = self.clock.borrow().current_cycle;
+            let cycle = self.clock.borrow().current_cycle / 3;
             println!("{:04x}     A: {:02x} X: {:02x} Y: {:02x} P: {:02x} SP = {:02x} cycle = {:}",
                 pc, a, x, y, p, sp, cycle);
             let next_instruction = self.mmu_load(pc);
