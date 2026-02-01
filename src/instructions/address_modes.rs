@@ -119,7 +119,7 @@ impl AddrMode for IndexedX {
         match atype {
             AccessType::Read => 4 + self.page_crossed as u64,
             AccessType::Write => 5,
-            AccessType::ReadModifyWrite => 6,
+            AccessType::ReadModifyWrite => 7,
             _ => panic!()
         }
     }
