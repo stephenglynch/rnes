@@ -55,19 +55,19 @@ pub struct Cpu {
     prg_rom: Vec<u8>,
     prg_ram: Vec<u8>,
     apu: Apu,
-    ppu: Ppu
+    ppu: Rc<Ppu>
 }
 
 impl Cpu {
-    pub fn new(clock: Rc<RefCell<Clock>>, prg_rom: Vec<u8>, chr_rom: Vec<u8>) -> Self {
+    pub fn new(clock: Rc<RefCell<Clock>>, prg_rom: Vec<u8>, ppu: Rc<Ppu>) -> Self {
         let mut cpu = Cpu {
-            clock: clock,
+            clock: clock.clone(),
             registers: Registers::new(),
             ram: vec![0; 2048],
             prg_rom: prg_rom,
             prg_ram: vec![0; 2048],
             apu: Apu::new(),
-            ppu: Ppu::new(chr_rom)
+            ppu: ppu
         };
         cpu.reset();
         cpu
@@ -75,10 +75,10 @@ impl Cpu {
 
     fn reset(&mut self) {
         // Resolve reset vector
-        // let pc_lo = self.mmu_load(0xfffc) as u16;
-        // let pc_hi = self.mmu_load(0xfffd) as u16;
-        // self.registers.pc = pc_lo | (pc_hi << 8);
-        self.registers.pc = 0xc000;
+        let pc_lo = self.mmu_load(0xfffc) as u16;
+        let pc_hi = self.mmu_load(0xfffd) as u16;
+        self.registers.pc = pc_lo | (pc_hi << 8);
+        // self.registers.pc = 0xc000;
         self.registers.sp = self.registers.sp.wrapping_sub(3);
     }
 
@@ -140,8 +140,8 @@ impl Cpu {
             let p = self.registers.sr.bits();
             let sp = self.registers.sp;
             let cycle = self.clock.borrow().current_cycle / 3;
-            println!("{:04x}     A: {:02x} X: {:02x} Y: {:02x} P: {:02x} SP = {:02x} cycle = {:}",
-                pc, a, x, y, p, sp, cycle);
+            println!("{:04x} op: {:02x} A: {:02x} X: {:02x} Y: {:02x} P: {:02x} SP = {:02x} cycle = {:}",
+                pc, self.mmu_load(pc), a, x, y, p, sp, cycle);
             let next_instruction = self.mmu_load(pc);
             execute(&mut self, next_instruction).await;
         }

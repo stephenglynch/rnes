@@ -1,4 +1,14 @@
+use std::cell::{Cell, RefCell, Ref, RefMut};
+use std::rc::Rc;
 use bitflags::bitflags;
+use crate::clock::{Clock, CycleDelay};
+
+// Awaits 1 ppu cycle
+macro_rules! cycles {
+    ($ppu:expr, $n:expr) => {
+        CycleDelay::new($ppu.clock.clone(), $n).await
+    }
+}
 
 bitflags! {
     /// Represents a set of flags.
@@ -35,80 +45,117 @@ bitflags! {
 }
 
 pub struct Ppu {
-    ppu_ctrl: PpuCtrl,
-    ppu_mask: PpuMask,
-    ppu_status: PpuStatus,
-    oam_addr: u8,
-    ppu_scroll_x: u8,
-    ppu_scroll_y: u8,
-    ppu_addr: u16,
-    write_toggle: bool,
-    chr_rom: Vec<u8>,
-    oam_data: Vec<u8>
+    ppu_ctrl: Cell<PpuCtrl>,
+    ppu_mask: Cell<PpuMask>,
+    ppu_status: Cell<PpuStatus>,
+    oam_addr: Cell<u8>,
+    ppu_scroll_x: Cell<u8>,
+    ppu_scroll_y: Cell<u8>,
+    ppu_addr: Cell<u16>,
+    write_toggle: Cell<bool>,
+    clock: Rc<RefCell<Clock>>,
+    chr_rom: RefCell<Vec<u8>>,
+    oam_data: RefCell<Vec<u8>>
 }
 
 impl Ppu {
-    pub fn new(chr_rom: Vec<u8>) -> Self {
+    pub fn new(clock: Rc<RefCell<Clock>>, chr_rom: Vec<u8>) -> Self {
         Self {
             //TODO: To be more accurate these should initialise to random values
-            ppu_ctrl: PpuCtrl::from_bits_retain(0),
-            ppu_mask: PpuMask::from_bits_retain(0),
-            ppu_status: PpuStatus::from_bits_retain(0),
-            oam_addr: 0,
-            oam_data: Vec::new(), // TODO change this, just needed to compile
-            ppu_scroll_x: 0,
-            ppu_scroll_y: 0,
-            ppu_addr: 0,
-            write_toggle: false,
-            chr_rom: chr_rom
+            clock: clock,
+            ppu_ctrl: Cell::new(PpuCtrl::from_bits_retain(0)),
+            ppu_mask: Cell::new(PpuMask::from_bits_retain(0)),
+            ppu_status: Cell::new(PpuStatus::from_bits_retain(0)),
+            oam_addr: Cell::new(0),
+            ppu_scroll_x: Cell::new(0),
+            ppu_scroll_y: Cell::new(0),
+            ppu_addr: Cell::new(0),
+            write_toggle: Cell::new(false),
+            oam_data: RefCell::new(Vec::new()), // TODO change this, just needed to compile
+            chr_rom: RefCell::new(chr_rom)
         }
     }
 
-    fn vram_increment(&mut self) {
-        self.ppu_addr = self.ppu_addr.wrapping_add(
-            if self.ppu_ctrl.contains(PpuCtrl::VRAM_INCR) {
+    pub async fn run(&self) {
+        let scan_line = 341;
+        loop {
+            // Render (0, 0)
+            cycles!(self, 241 * scan_line + 1);
+            // TODO
+
+            // V-blank (241, 1)
+            self.ppu_status.set(self.ppu_status.get() | PpuStatus::VBLANK);
+            cycles!(self, 20 * scan_line);
+
+            // Pre-render (261, 1)
+            self.ppu_status.set(self.ppu_status.get() & !PpuStatus::VBLANK);
+            cycles!(self, scan_line - 1);
+        }
+    }
+
+    fn vram_increment(&self) {
+        let vram_incr_flag = self.ppu_ctrl.get().contains(PpuCtrl::VRAM_INCR);
+        self.ppu_addr.set(self.ppu_addr.get().wrapping_add(
+            if vram_incr_flag {
                 32
             } else {
                 1
-            }
+            })
         );
     }
 
-    fn write_vram(&mut self, val: u8) {
-        self.chr_rom[self.ppu_addr as usize] = val;
+    fn write_vram(&self, val: u8) {
+        let addr = self.ppu_addr.get();
+        self.chr_rom.borrow_mut()[addr as usize] = val;
         self.vram_increment();
     }
 
-    fn read_vram(&mut self) -> u8 {
-        let val = self.chr_rom[self.ppu_addr as usize];
+    fn read_vram(&self) -> u8 {
+        let addr = self.ppu_addr.get();
+        let val = self.chr_rom.borrow_mut()[addr as usize];
         self.vram_increment();
         val
     }
 
-    fn read_ppu_status(&mut self) -> u8 {
-        self.write_toggle = false;
-        self.ppu_status.bits()
+    fn read_status(&self) -> u8 {
+        self.write_toggle.set(false);
+        self.ppu_status.get().bits()
     }
 
-    pub fn set_reg(&mut self, addr: usize, val: u8) {
+    pub fn set_reg(&self, addr: usize, val: u8) {
+        let write_toggle = self.write_toggle.get();
         match addr {
-            0 => self.ppu_ctrl = PpuCtrl::from_bits_retain(val),
-            1 => self.ppu_mask = PpuMask::from_bits_retain(val),
+            0 => self.ppu_ctrl.set(PpuCtrl::from_bits_retain(val)),
+            1 => self.ppu_mask.set(PpuMask::from_bits_retain(val)),
             2 => (),
-            3 => self.oam_addr = val,
+            3 => self.oam_addr.set(val),
             4 => self.write_oam(val),
-            5 => if !self.write_toggle { self.ppu_scroll_x = val } else { self.ppu_scroll_y = val },
-            6 => self.ppu_addr = if !self.write_toggle { (val as u16) << 8 } else { val as u16 },
+            5 => {
+                if !write_toggle {
+                    self.ppu_scroll_x.set(val)
+                } else {
+                    self.ppu_scroll_y.set(val)
+                }
+                self.write_toggle.set(!self.write_toggle.get());
+            },
+            6 => {
+                self.ppu_addr.set(if !write_toggle {
+                    (val as u16) << 8
+                } else {
+                    val as u16
+                });
+                self.write_toggle.set(!self.write_toggle.get());
+            },
             7 => self.write_vram(val),
             _ => unreachable!()
         }
     }
 
-    pub fn get_reg(&mut self, addr: usize) -> u8 {
+    pub fn get_reg(&self, addr: usize) -> u8 {
         match addr {
             0 => 0,
             1 => 0,
-            2 => self.read_ppu_status(),
+            2 => self.read_status(),
             3 => 0,
             4 => self.read_oam(),
             5 => 0,
@@ -119,11 +166,12 @@ impl Ppu {
     }
 
     fn read_oam(&self) -> u8 {
-        self.oam_data[self.oam_addr as usize]
+        self.oam_data.borrow_mut()[self.oam_addr.get() as usize]
     }
 
-    pub fn write_oam(&mut self, val: u8) {
-        self.oam_data[self.oam_addr as usize] = val;
-        self.oam_addr = self.oam_addr.wrapping_add(1);
+    pub fn write_oam(&self, val: u8) {
+        let oam_addr = self.oam_addr.get();
+        self.oam_data.borrow_mut()[oam_addr as usize] = val;
+        self.oam_addr.set(oam_addr.wrapping_add(1));
     }
 }
