@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 use bitflags::bitflags;
-use crate::instructions::{execute, push_raw};
+use crate::instructions::{execute, interrupt};
 use crate::ppu::Ppu;
 use crate::apu::Apu;
 use crate::clock::Clock;
@@ -84,22 +84,10 @@ impl Cpu {
         self.registers.sp = self.registers.sp.wrapping_sub(3);
     }
 
-    fn jump_to_nmi_vector(&mut self) {
-        let ret_addr = self.registers.pc + 2;
-        let ret_addr_hi = ((ret_addr & 0xff00) >> 8) as u8;
-        let ret_addr_lo = ret_addr as u8;
-        // Save CPU state to stack
-        push_raw(self, ret_addr_hi);
-        push_raw(self, ret_addr_lo);
-        let mut status = self.registers.sr;
-        status.set(StatusRegister::BREAK, false);
-        push_raw(self, status.bits());
+    async fn jump_to_nmi_vector(&mut self) {
         // Unset NMI flip-flop
         self.nmi_ff = false;
-        // Jump to interrupt vector
-        let pc_lo = self.mmu_load(0xfffa) as u16;
-        let pc_hi = self.mmu_load(0xfffb) as u16;
-        self.registers.pc = pc_lo | (pc_hi << 8);
+        interrupt(self, 0xfffa).await;
     }
 
     fn mmu_resolve(&self, addr: u16) -> (Memory, usize) {
@@ -165,7 +153,7 @@ impl Cpu {
             // Check NMI request
             if self.nmi_ff {
                 // println!("NMI interrupt!");
-                self.jump_to_nmi_vector();
+                self.jump_to_nmi_vector().await;
             }
 
             // Run next instruction
