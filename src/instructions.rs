@@ -74,7 +74,7 @@ async fn txs(sys: &mut Cpu) {
 
 // Stack operations
 
-fn push_raw(sys: &mut Cpu, val: u8) {
+pub fn push_raw(sys: &mut Cpu, val: u8) {
     let sp = sys.registers.sp as u16;
     sys.mmu_store(0x0100 + sp, val);
     sys.registers.sp -= 1;
@@ -93,7 +93,7 @@ async fn pha(sys: &mut Cpu) {
     cycles!(sys, 3);
 }
 
-fn pull_raw(sys: &mut Cpu) -> u8 {
+pub fn pull_raw(sys: &mut Cpu) -> u8 {
     sys.registers.sp += 1;
     sys.mmu_load(0x0100 + sys.registers.sp as u16)
 }

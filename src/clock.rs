@@ -15,7 +15,7 @@ impl Clock {
     pub fn new() -> Self {
         Clock {
             current_cycle: 3 * 7, // The starting cycle number for thge CPU
-            sleepers: BTreeMap::new()
+            sleepers: BTreeMap::new() // TODO: This generates expensive heap allocations and is bottle necking performance
         }
     }
 

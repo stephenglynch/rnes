@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 use bitflags::bitflags;
-use crate::instructions::execute;
+use crate::instructions::{execute, push_raw};
 use crate::ppu::Ppu;
 use crate::apu::Apu;
 use crate::clock::Clock;
@@ -51,6 +51,7 @@ enum Memory {
 pub struct Cpu {
     pub registers: Registers,
     pub clock: Rc<RefCell<Clock>>,
+    nmi_ff: bool,
     ram: Vec<u8>,
     prg_rom: Vec<u8>,
     prg_ram: Vec<u8>,
@@ -67,7 +68,8 @@ impl Cpu {
             prg_rom: prg_rom,
             prg_ram: vec![0; 2048],
             apu: Apu::new(),
-            ppu: ppu
+            ppu: ppu,
+            nmi_ff: false
         };
         cpu.reset();
         cpu
@@ -80,6 +82,24 @@ impl Cpu {
         self.registers.pc = pc_lo | (pc_hi << 8);
         // self.registers.pc = 0xc000;
         self.registers.sp = self.registers.sp.wrapping_sub(3);
+    }
+
+    fn jump_to_nmi_vector(&mut self) {
+        let ret_addr = self.registers.pc + 2;
+        let ret_addr_hi = ((ret_addr & 0xff00) >> 8) as u8;
+        let ret_addr_lo = ret_addr as u8;
+        // Save CPU state to stack
+        push_raw(self, ret_addr_hi);
+        push_raw(self, ret_addr_lo);
+        let mut status = self.registers.sr;
+        status.set(StatusRegister::BREAK, false);
+        push_raw(self, status.bits());
+        // Unset NMI flip-flop
+        self.nmi_ff = false;
+        // Jump to interrupt vector
+        let pc_lo = self.mmu_load(0xfffa) as u16;
+        let pc_hi = self.mmu_load(0xfffb) as u16;
+        self.registers.pc = pc_lo | (pc_hi << 8);
     }
 
     fn mmu_resolve(&self, addr: u16) -> (Memory, usize) {
@@ -132,7 +152,23 @@ impl Cpu {
     }
 
     pub async fn run(mut self) {
+        let mut nmi_level = false;
         loop {
+            // Detect NMI 'edge' change
+            if self.ppu.nmi_request() && !nmi_level {
+                nmi_level = true;
+                self.nmi_ff = true;
+            } else if !self.ppu.nmi_request() && nmi_level {
+                nmi_level = false;
+            }
+
+            // Check NMI request
+            if self.nmi_ff {
+                // println!("NMI interrupt!");
+                self.jump_to_nmi_vector();
+            }
+
+            // Run next instruction
             let pc = self.registers.pc;
             let a = self.registers.ac;
             let x = self.registers.x;

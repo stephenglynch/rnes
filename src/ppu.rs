@@ -165,6 +165,12 @@ impl Ppu {
         }
     }
 
+    pub fn nmi_request(&self) -> bool {
+        let vblank = self.ppu_status.get().contains(PpuStatus::VBLANK);
+        let nmi_enable = self.ppu_ctrl.get().contains(PpuCtrl::NMI_EN);
+        vblank && nmi_enable
+    }
+
     fn read_oam(&self) -> u8 {
         self.oam_data.borrow_mut()[self.oam_addr.get() as usize]
     }
