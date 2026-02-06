@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 // use error_iter::ErrorIter as _;
+use std::sync::mpsc;
 use pixels::{Error, Pixels, SurfaceTexture};
 use winit::dpi::LogicalSize;
 use winit::event::{Event, WindowEvent};
@@ -9,123 +10,88 @@ use winit::event_loop::EventLoop;
 use winit::keyboard::KeyCode;
 use winit::window::WindowBuilder;
 use winit_input_helper::WinitInputHelper;
-
-const WIDTH: u32 = 320;
-const HEIGHT: u32 = 240;
-const BOX_SIZE: i16 = 64;
+use crate::ppu::{WIDTH, HEIGHT};
 
 /// Representation of the application state. In this example, a box will bounce around the screen.
-struct World {
-    box_x: i16,
-    box_y: i16,
-    velocity_x: i16,
-    velocity_y: i16,
+
+pub struct Renderer {
+    rx: mpsc::Receiver<Vec<u8>>,
+    tx: mpsc::Sender<Vec<u8>>
 }
 
-pub fn render() -> Result<(), Error> {
-    let event_loop = EventLoop::new().unwrap();
-    let mut input = WinitInputHelper::new();
-    let window = {
-        let size = LogicalSize::new(WIDTH as f64, HEIGHT as f64);
-        WindowBuilder::new()
-            .with_title("Hello Pixels")
-            .with_inner_size(size)
-            .with_min_inner_size(size)
-            .build(&event_loop)
-            .unwrap()
-    };
-
-    let mut pixels = {
-        let window_size = window.inner_size();
-        let surface_texture = SurfaceTexture::new(window_size.width, window_size.height, &window);
-        Pixels::new(WIDTH, HEIGHT, surface_texture)?
-    };
-    let mut world = World::new();
-
-    let res = event_loop.run(|event, elwt| {
-        // Draw the current frame
-        if let Event::WindowEvent {
-            event: WindowEvent::RedrawRequested,
-            ..
-        } = event
-        {
-            world.draw(pixels.frame_mut());
-            if let Err(err) = pixels.render() {
-                println!("pixels.render: {}", err.to_string());
-                elwt.exit();
-                return;
-            }
+impl Renderer {
+    pub fn new() -> Self {
+        let (tx, rx) = mpsc::channel();
+        Renderer {
+            tx: tx,
+            rx: rx
         }
+    }
 
-        // Handle input events
-        if input.update(&event) {
-            // Close events
-            if input.key_pressed(KeyCode::Escape) || input.close_requested() {
-                elwt.exit();
-                return;
-            }
+    pub fn get_frame_sender(&self) -> mpsc::Sender<Vec<u8>> {
+        self.tx.clone()
+    }
 
-            // Resize the window
-            if let Some(size) = input.window_resized() {
-                if let Err(err) = pixels.resize_surface(size.width, size.height) {
-                    println!("pixels.resize_surface: {}", err.to_string());
+    pub fn run(self) -> Result<(), Error> {
+        let event_loop: EventLoop<()> = EventLoop::new().unwrap();
+        let mut input = WinitInputHelper::new();
+        let window = {
+            let size = LogicalSize::new(WIDTH as f64, HEIGHT as f64);
+            WindowBuilder::new()
+                .with_title("Hello Pixels")
+                .with_inner_size(size)
+                .with_min_inner_size(size)
+                .build(&event_loop)
+                .unwrap()
+        };
+
+        let mut pixels = {
+            let window_size = window.inner_size();
+            let surface_texture: SurfaceTexture<&winit::window::Window> = SurfaceTexture::new(window_size.width, window_size.height, &window);
+            Pixels::new(WIDTH as u32, HEIGHT as u32, surface_texture)?
+        };
+
+        let res = event_loop.run(|event, elwt| {
+            // Draw the current frame
+            if let Event::WindowEvent {
+                event: WindowEvent::RedrawRequested,
+                ..
+            } = event
+            {
+                // Get frame buffer and render
+                if let Ok(frame) = self.rx.try_recv() {
+                    let pixels_frame = pixels.frame_mut();
+                    pixels_frame.clone_from_slice(&frame);
+                }
+                if let Err(err) = pixels.render() {
+                    println!("pixels.render: {}", err.to_string());
                     elwt.exit();
                     return;
                 }
             }
 
-            // Update internal state and request a redraw
-            world.update();
-            window.request_redraw();
-        }
-    });
-    res.map_err(|e| Error::UserDefined(Box::new(e)))
-}
+            // Handle input events
+            if input.update(&event) {
+                // Close events
+                if input.key_pressed(KeyCode::Escape) || input.close_requested() {
+                    elwt.exit();
+                    return;
+                }
 
-impl World {
-    /// Create a new `World` instance that can draw a moving box.
-    fn new() -> Self {
-        Self {
-            box_x: 24,
-            box_y: 16,
-            velocity_x: 1,
-            velocity_y: 1,
-        }
+                // Resize the window
+                if let Some(size) = input.window_resized() {
+                    if let Err(err) = pixels.resize_surface(size.width, size.height) {
+                        println!("pixels.resize_surface: {}", err.to_string());
+                        elwt.exit();
+                        return;
+                    }
+                }
+
+                // Update internal state and request a redraw
+                window.request_redraw();
+            }
+        });
+        res.map_err(|e| Error::UserDefined(Box::new(e)))
     }
 
-    /// Update the `World` internal state; bounce the box around the screen.
-    fn update(&mut self) {
-        if self.box_x <= 0 || self.box_x + BOX_SIZE > WIDTH as i16 {
-            self.velocity_x *= -1;
-        }
-        if self.box_y <= 0 || self.box_y + BOX_SIZE > HEIGHT as i16 {
-            self.velocity_y *= -1;
-        }
-
-        self.box_x += self.velocity_x;
-        self.box_y += self.velocity_y;
-    }
-
-    /// Draw the `World` state to the frame buffer.
-    ///
-    /// Assumes the default texture format: `wgpu::TextureFormat::Rgba8UnormSrgb`
-    fn draw(&self, frame: &mut [u8]) {
-        for (i, pixel) in frame.chunks_exact_mut(4).enumerate() {
-            let x = (i % WIDTH as usize) as i16;
-            let y = (i / WIDTH as usize) as i16;
-
-            let inside_the_box = x >= self.box_x
-                && x < self.box_x + BOX_SIZE
-                && y >= self.box_y
-                && y < self.box_y + BOX_SIZE;
-
-            let rgba = if inside_the_box {
-                [0x5e, 0x48, 0xe8, 0xff]
-            } else {
-                [0x48, 0xb2, 0xe8, 0xff]
-            };
-
-            pixel.copy_from_slice(&rgba);
-        }
-    }
 }
