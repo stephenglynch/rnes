@@ -90,65 +90,94 @@ enum PalletId {
     Pallet3
 }
 
-struct Pattern {
-    data: [PalletId; 64]
-}
+#[derive(Clone, Copy)]
+struct VramAddr(u16);
 
-impl Pattern {
-    fn new() -> Self {
-        Pattern {
-            data: [PalletId::Transparent; 64]
-        }
+impl VramAddr {
+    fn set_x_scroll_course(self, val: u8) -> Self {
+        let mut v = self.0;
+        v &= !0b00000000_00011111; // Clear x-scroll bits
+        v |= (val as u16 & 0b11111000) >> 3;
+        VramAddr(v)
     }
 
-    fn parse(vram: &[u8]) -> Self {
-        let mut pattern = Pattern::new();
-        for i in 0..8 {
-            let plane_part1 = vram[i];
-            let plane_part2 = vram[i+8];
-            for bit_pos in 0..8 {
-                let bit1 = plane_part1 & (1 << bit_pos) != 0;
-                let bit2 = plane_part2 & (1 << bit_pos) != 0;
-                pattern.data[i*8 + bit_pos] = match (bit1, bit2) {
-                    (false, false) => PalletId::Transparent,
-                    (false, true)  => PalletId::Pallet1,
-                    (true, false)  => PalletId::Pallet2,
-                    (true, true)   => PalletId::Pallet3
-                };
-            }
-        }
-        pattern
+    fn set_x_scroll(self, val: u8) -> (Self, u8) {
+        (self.set_x_scroll_course(val), val as u8 & 0b111)
+    }
+
+    fn set_y_scroll(self, val: u8) -> Self {
+        let val = val as u16;
+        let mut v = self.0;
+        v &= !0b01110011_11100000; // Clear y-scroll bits
+        v |= (val & 0b11111000) << 2;
+        v |= (val & 0b00000111) << 12;
+        VramAddr(v)
+    }
+
+    fn to_x_scroll_course(&self) -> u8 {
+        (self.0 << 3) as u8
+    }
+
+    fn to_y_scroll(&self) -> u8 {
+        let mut y = 0;
+        y |= (self.0 & 0b01110000_00000000) >> 12;
+        y |= (self.0 & 0b00000011_11100000) >> 5;
+        y as u8
+    }
+
+    fn add_x_scroll_course(self, val: u8) -> Self {
+        let val = self.to_x_scroll_course() + val;
+        self.set_x_scroll_course(val)
+    }
+
+    fn add_y_scroll(self, val: u8) -> Self {
+        let val = self.to_y_scroll() + val;
+        self.set_y_scroll(val)
+    }
+
+    fn set_x_scroll_with_addr(&self, other: Self) -> Self {
+        let mut new_v = self.0 & !0b00000000_00011111;
+        let other = other.0;
+        new_v |= other & 0b00000000_00011111;
+        VramAddr(new_v)
+    }
+
+    fn set_y_scroll_with_addr(&self, other: Self) -> Self {
+        let mut new_v = self.0 & !0b01110011_11100000;
+        let other = other.0;
+        new_v |= other & 0b01110011_11100000;
+        VramAddr(new_v)
     }
 }
 
 pub struct Ppu {
+    // CPU regs
     ppu_ctrl: Cell<PpuCtrl>,
     ppu_mask: Cell<PpuMask>,
     ppu_status: Cell<PpuStatus>,
     oam_addr: Cell<u8>,
-    ppu_scroll_x: Cell<u8>,
-    ppu_scroll_y: Cell<u8>,
-    ppu_addr: Cell<u16>,
+
+    // Loopy regs
     write_toggle: Cell<bool>,
+    t_reg: Cell<VramAddr>,
+    v_reg: Cell<VramAddr>,
+    x_fine_reg: Cell<u8>,
+
+    // Other resources
     clock: Rc<RefCell<Clock>>,
     chr_rom: RefCell<Vec<u8>>,
     ram: RefCell<Vec<u8>>,
+    palette_ram: RefCell<Vec<u8>>,
     oam_data: RefCell<Vec<u8>>,
     frame_sender: mpsc::Sender<Vec<u8>>
 }
 
 enum Memory {
     ChrRom,
-    Ram
+    Ram,
+    PaletteRam,
 }
 
-
-fn compute_fine_x_scroll(full_chunk: &[Rgb; 16], fine_x: u8) -> [Rgb; 8] {
-    let fine_x = fine_x as usize;
-    let mut output_chunk = [Rgb::new(); 8];
-    output_chunk.copy_from_slice(&full_chunk[fine_x..(fine_x + 8)]);
-    output_chunk
-}
 
 impl Ppu {
     pub fn new(clock: Rc<RefCell<Clock>>, chr_rom: Vec<u8>, frame_sender: mpsc::Sender<Vec<u8>>) -> Self {
@@ -159,72 +188,106 @@ impl Ppu {
             ppu_mask: Cell::new(PpuMask::from_bits_retain(0)),
             ppu_status: Cell::new(PpuStatus::from_bits_retain(0)),
             oam_addr: Cell::new(0),
-            ppu_scroll_x: Cell::new(0),
-            ppu_scroll_y: Cell::new(0),
-            ppu_addr: Cell::new(0),
+            t_reg: Cell::new(VramAddr(0)),
+            v_reg: Cell::new(VramAddr(0)),
+            x_fine_reg: Cell::new(0),
             write_toggle: Cell::new(false),
             oam_data: RefCell::new(Vec::new()), // TODO change this, just needed to compile
             chr_rom: RefCell::new(chr_rom),
             ram: RefCell::new(vec![0; 4096]),
+            palette_ram: RefCell::new(vec![0; 32]),
             frame_sender: frame_sender
         }
     }
 
+    fn apply_fine_x_scroll(&self, full_chunk: &[Rgb; 16]) -> [Rgb; 8] {
+        let fine_x = self.x_fine_reg.get() as usize;
+        let mut output_chunk = [Rgb::new(); 8];
+        output_chunk.copy_from_slice(&full_chunk[fine_x..(fine_x + 8)]);
+        output_chunk
+    }
+
+    fn v_hor_inc(&self) {
+        self.v_reg.set(self.v_reg.get().add_x_scroll_course(1));
+    }
+
+    fn v_ver_inc(&self) {
+        self.v_reg.set(self.v_reg.get().add_y_scroll(1));
+    }
+
+    fn reset_v_hor(&self) {
+        let v = self.v_reg.get();
+        let t = self.t_reg.get();
+        self.v_reg.set(v.set_x_scroll_with_addr(t));
+    }
+
+    fn reset_v_ver(&self) {
+        let v = self.v_reg.get();
+        let t = self.t_reg.get();
+        self.v_reg.set(v.set_y_scroll_with_addr(t));
+    }
+
     pub async fn run(&self) {
+        // Not correctly updating v
         let mut full_chunk = [Rgb::new(); 16];
         let mut frame = RgbFrame::new();
         let mut odd_frame = true;
         loop {
             println!("!!!! Start of frame !!!!");
-            let (mut v, fine_x) = self.get_t_x();
             // Pre-render (-1, 0)
             cycles!(self, 1);
             // Pre-render (-1, 1)
             self.ppu_status.set(self.ppu_status.get() & !PpuStatus::VBLANK);
             cycles!(self, 320);
             // Pre-render (-1, 321) - prefetch next two tiles
-            let mut chunk0 = self.render_line_chunk(v);
-            v += 1;
-            let mut chunk1 = self.render_line_chunk(v);
-            v += 1;
+            let mut chunk0 = self.render_line_chunk();
+            self.v_hor_inc();
+            let mut chunk1 = self.render_line_chunk();
+            self.v_hor_inc();
             full_chunk[0..8].copy_from_slice(&chunk0[0..8]);
             full_chunk[8..16].copy_from_slice(&chunk1[0..8]);
             cycles!(self, 16 + 4);
 
             // Visible lines (0, 0)
             for l in 0..240 {
-                // Render line (n, 0)
+                // Render line (l, 0)
                 // Check if skip dot (0, 0)
                 if odd_frame || l > 0 {
                     cycles!(self, 1);
                 }
 
+                // (l, 1)
                 for i in 0..32 {
                     // Render chunk
-                    let drawn_chunk = compute_fine_x_scroll(&full_chunk, fine_x);
-                    let start = i*8;
-                    let end = start + 8;
+                    let drawn_chunk = self.apply_fine_x_scroll(&full_chunk);
                     frame.write_chunk(l, i, drawn_chunk);
 
                     // Get next chunk
                     chunk0 = chunk1;
-                    chunk1 = self.render_line_chunk(v);
-                    v += 1;
+                    chunk1 = self.render_line_chunk();
                     full_chunk[0..8].copy_from_slice(&chunk0[0..8]);
                     full_chunk[8..16].copy_from_slice(&chunk1[0..8]);
                     cycles!(self, 8);
+                    self.v_hor_inc();
                 }
-                // (, 255) Nothing really happens for the rest of the line
+                self.v_ver_inc();
+                cycles!(self, 1);
+
+                // (l, 257) hori(v) = hori(t)
+                self.reset_v_hor();
+
+                // (l, 256) Nothing really happens for the rest of the line
                 cycles!(self, 84);
             }
 
+            println!("!!!! Start of v-blank !!!!");
             // Post-render line (240, 0)
             cycles!(self, 340 + 1);
             // Post-render line (241, 1)
             self.ppu_status.set(self.ppu_status.get() | PpuStatus::VBLANK);
             cycles!(self, 340 + 341 * 19);
 
-            self.frame_sender.send(frame.to_rgb_frame());
+            self.frame_sender.send(frame.to_rgb_frame()).unwrap();
 
             odd_frame = !odd_frame;
         }
@@ -233,8 +296,9 @@ impl Ppu {
     fn mmu_resolve(&self, addr: u16) -> (Memory, usize) {
         let (mem, loc) = match addr {
             0x0000..0x2000 => (Memory::ChrRom, addr),
-            0x2000..0x4000 => (Memory::Ram, addr - 0x2000),
-                         _ => panic!("Unexpected vram access")
+            0x2000..0x3f00 => (Memory::Ram, addr & 0x0fff),
+            0x3f00..0x3fff => (Memory::PaletteRam, addr & 0x001f),
+                         _ => panic!("Unexpected vram access: 0x{:04x}", addr)
         };
         (mem, loc as usize)
     }
@@ -244,7 +308,8 @@ impl Ppu {
         let (mem, addr) = self.mmu_resolve(addr);
         match mem {
             Memory::ChrRom => self.chr_rom.borrow()[addr],
-            Memory::Ram => self.ram.borrow()[addr]
+            Memory::Ram => self.ram.borrow()[addr],
+            Memory::PaletteRam => self.palette_ram.borrow()[addr]
         }
     }
 
@@ -252,11 +317,13 @@ impl Ppu {
         let (mem, addr) = self.mmu_resolve(addr);
         match mem {
             Memory::ChrRom => (), // Do nothing if writing into ROM
-            Memory::Ram => self.ram.borrow_mut()[addr] = val
+            Memory::Ram => self.ram.borrow_mut()[addr] = val,
+            Memory::PaletteRam => self.palette_ram.borrow_mut()[addr] =val
         }
     }
 
-    fn render_line_chunk(&self, v: u16) -> [Rgb; 8] {
+    fn render_line_chunk(&self) -> [Rgb; 8] {
+        let v = self.v_reg.get().0;
         let mut rgb_chunk = [Rgb::new(); 8];
         let course_x = (v) & 0b11111;
         let course_y = (v >> 5) & 0b11111;
@@ -286,28 +353,15 @@ impl Ppu {
         rgb_chunk
     }
 
-    fn vram_increment(&self) {
+    fn v_addr_increment(&self) {
         let vram_incr_flag = self.ppu_ctrl.get().contains(PpuCtrl::VRAM_INCR);
-        self.ppu_addr.set(self.ppu_addr.get().wrapping_add(
+        self.v_reg.set(VramAddr(self.v_reg.get().0.wrapping_add(
             if vram_incr_flag {
                 32
             } else {
                 1
-            })
+            }))
         );
-    }
-
-    fn write_vram(&self, val: u8) {
-        let addr = self.ppu_addr.get();
-        self.chr_rom.borrow_mut()[addr as usize] = val;
-        self.vram_increment();
-    }
-
-    fn read_vram(&self) -> u8 {
-        let addr = self.ppu_addr.get();
-        let val = self.chr_rom.borrow_mut()[addr as usize];
-        self.vram_increment();
-        val
     }
 
     fn read_status(&self) -> u8 {
@@ -315,42 +369,54 @@ impl Ppu {
         self.ppu_status.get().bits()
     }
 
-    fn get_t_x(&self) -> (u16, u8) {
-        let scroll_x = self.ppu_scroll_x.get() as u16;
-        let scroll_y = self.ppu_scroll_y.get() as u16;
-        let t =
-            ((scroll_x & 0b11111000) >> 3) |
-            ((scroll_y & 0b11111000) << 2) |
-            ((scroll_y & 0b00000111) << 13);
-        let x = scroll_x as u8 & 0b111;
-        (t, x)
-    }
-
     pub fn set_reg(&self, addr: usize, val: u8) {
         let write_toggle = self.write_toggle.get();
         match addr {
-            0 => self.ppu_ctrl.set(PpuCtrl::from_bits_retain(val)),
+            0 => {
+                self.ppu_ctrl.set(PpuCtrl::from_bits_retain(val));
+                let mut t = self.t_reg.get().0;
+                t &= !(0b0001100_00000000); // Clear nametable bits
+                t |= (val as u16 & 0b00000011) << 10; // Set the new nametable bits
+                self.t_reg.set(VramAddr(t));
+            },
             1 => self.ppu_mask.set(PpuMask::from_bits_retain(val)),
             2 => (),
             3 => self.oam_addr.set(val),
             4 => self.write_oam(val),
             5 => {
-                if !write_toggle {
-                    self.ppu_scroll_x.set(val)
+                let mut t = self.t_reg.get();
+                self.t_reg.set(if !write_toggle {
+                    println!("Writing {:02x} to PPU_SCROLL X", val);
+                    let (t, x_fine) = t.set_x_scroll(val);
+                    self.x_fine_reg.set(x_fine);
+                    t
                 } else {
-                    self.ppu_scroll_y.set(val)
-                }
-                self.write_toggle.set(!self.write_toggle.get());
+                    println!("Writing {:02x} to PPU_SCROLL Y", val);
+                    t.set_y_scroll(val)
+                });
+                self.write_toggle.set(!write_toggle);
             },
             6 => {
-                self.ppu_addr.set(if !write_toggle {
-                    (val as u16) << 8
+                let mut t = self.t_reg.get().0;
+                if !write_toggle {
+                    println!("Writing {:02x} to PPU_ADDR MSB", val);
+                    t &= !0xff00;
+                    t |= (val as u16) << 8;
                 } else {
-                    val as u16
-                });
-                self.write_toggle.set(!self.write_toggle.get());
+                    println!("Writing {:02x} to PPU_ADDR LSB", val);
+                    t &= !0x00ff;
+                    t |= val as u16;
+                };
+                self.write_toggle.set(!write_toggle);
+                let t = VramAddr(t);
+                self.t_reg.set(t);
+                self.v_reg.set(t);
             },
-            7 => self.write_vram(val),
+            7 => {
+                println!("Writing to address: {:04x}", self.v_reg.get().0);
+                self.mmu_store(self.v_reg.get().0, val);
+                self.v_addr_increment();
+            },
             _ => unreachable!()
         }
     }
@@ -364,7 +430,11 @@ impl Ppu {
             4 => self.read_oam(),
             5 => 0,
             6 => 0,
-            7 => self.read_vram(),
+            7 => {
+                let val = self.mmu_load(self.v_reg.get().0);
+                self.v_addr_increment();
+                val
+            },
             _ => unreachable!()
         }
     }
