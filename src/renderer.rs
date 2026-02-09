@@ -1,7 +1,3 @@
-#![deny(clippy::all)]
-#![forbid(unsafe_code)]
-
-// use error_iter::ErrorIter as _;
 use std::sync::mpsc;
 use pixels::{Error, Pixels, SurfaceTexture};
 use winit::dpi::LogicalSize;
@@ -45,7 +41,7 @@ impl Renderer {
                 .unwrap()
         };
 
-        let mut pixels = {
+        let mut pixels: Pixels<'_> = {
             let window_size = window.inner_size();
             let surface_texture: SurfaceTexture<&winit::window::Window> = SurfaceTexture::new(window_size.width, window_size.height, &window);
             Pixels::new(WIDTH as u32, HEIGHT as u32, surface_texture)?
@@ -59,11 +55,7 @@ impl Renderer {
             } = event
             {
                 // Get frame buffer and render
-                if let Ok(frame) = self.rx.try_recv() {
-                    let pixels_frame = pixels.frame_mut();
-                    pixels_frame.clone_from_slice(&frame);
-                }
-                if let Err(err) = pixels.render() {
+                if let Err(err) = self.render_frame(&mut pixels) {
                     println!("pixels.render: {}", err.to_string());
                     elwt.exit();
                     return;
@@ -92,6 +84,15 @@ impl Renderer {
             }
         });
         res.map_err(|e| Error::UserDefined(Box::new(e)))
+    }
+
+    fn render_frame(&self, pixels: &mut Pixels<'_>) -> Result<(), Error> {
+        // Get frame buffer and render
+        if let Ok(frame) = self.rx.try_recv() {
+            let pixels_frame = pixels.frame_mut();
+            pixels_frame.clone_from_slice(&frame);
+        }
+        pixels.render()
     }
 
 }
