@@ -94,51 +94,72 @@ enum PalletId {
 struct VramAddr(u16);
 
 impl VramAddr {
-    fn set_x_scroll_course(self, val: u8) -> Self {
+
+    fn set_x_course(self, val: u16) -> Self {
         let mut v = self.0;
-        v &= !0b00000000_00011111; // Clear x-scroll bits
-        v |= (val as u16 & 0b11111000) >> 3;
+        v &= !0b00000000_00011111; // Clear x-scroll bits and nametable bits
+        v |= (val & 0b11111000) >> 3; // Set course scroll bits (3-7)
         VramAddr(v)
     }
 
-    fn set_x_scroll(self, val: u8) -> (Self, u8) {
-        (self.set_x_scroll_course(val), val as u8 & 0b111)
+    fn set_x(self, val: u16) -> Self {
+        let mut v = self.set_x_course(val).0;
+        v |= (val & 0b00000001_00000000) << 2; // Set scroll bit 8
+        VramAddr(v)
     }
 
-    fn set_y_scroll(self, val: u8) -> Self {
-        let val = val as u16;
+    fn set_y_course(self, val: u16) -> Self {
+        let val = val;
         let mut v = self.0;
-        v &= !0b01110011_11100000; // Clear y-scroll bits
+        v &= !0b00000011_11100000; // Clear course y-scroll bits
         v |= (val & 0b11111000) << 2;
+        VramAddr(v)
+    }
+
+    fn set_y_fine(self, val: u16) -> Self {
+        let val = val;
+        let mut v = self.0;
+        v &= !0b01110000_00000000; // Clear fine y-scroll bits
         v |= (val & 0b00000111) << 12;
         VramAddr(v)
     }
 
-    fn to_x_scroll_course(&self) -> u8 {
-        (self.0 << 3) as u8
+    fn set_y(self, val: u16) -> Self {
+        let v = self.set_y_course(val);
+        let mut v = v.set_y_fine(val).0;
+        v |= (val & 0b00000001_00000000) << 3; // Set scroll bit 8
+        VramAddr(v)
     }
 
-    fn to_y_scroll(&self) -> u8 {
+    fn to_x_course(&self) -> u16 {
+        let mut v = 0;
+        v |= (0b00000000_00011111 & self.0) << 3;
+        v |= (0b00000100_00000000 & self.0) >> 2;
+        v
+    }
+
+    fn to_y(&self) -> u16 {
         let mut y = 0;
         y |= (self.0 & 0b01110000_00000000) >> 12;
-        y |= (self.0 & 0b00000011_11100000) >> 5;
-        y as u8
+        y |= (self.0 & 0b00000011_11100000) >> 2;
+        y |= (self.0 & 0b00001000_00000000) >> 3;
+        y
     }
 
-    fn add_x_scroll_course(self, val: u8) -> Self {
-        let val = self.to_x_scroll_course() + val;
-        self.set_x_scroll_course(val)
+    fn add_x_course(self, val: u16) -> Self {
+        let val = self.to_x_course() + val;
+        self.set_x(val)
     }
 
-    fn add_y_scroll(self, val: u8) -> Self {
-        let val = self.to_y_scroll() + val;
-        self.set_y_scroll(val)
+    fn add_y(self, val: u16) -> Self {
+        let val = self.to_y() + val;
+        self.set_y(val)
     }
 
     fn set_x_scroll_with_addr(&self, other: Self) -> Self {
-        let mut new_v = self.0 & !0b00000000_00011111;
+        let mut new_v = self.0 & !0b00001100_00011111;
         let other = other.0;
-        new_v |= other & 0b00000000_00011111;
+        new_v |= other & 0b00001100_00011111;
         VramAddr(new_v)
     }
 
@@ -208,73 +229,118 @@ impl Ppu {
     }
 
     fn v_hor_inc(&self) {
-        self.v_reg.set(self.v_reg.get().add_x_scroll_course(1));
+        self.v_reg.set(self.v_reg.get().add_x_course(8));
+        println!("inc hori(v) = {:04x}", self.v_reg.get().0);
     }
 
     fn v_ver_inc(&self) {
-        self.v_reg.set(self.v_reg.get().add_y_scroll(1));
+        self.v_reg.set(self.v_reg.get().add_y(1));
+        println!("inc vert(v) = {:04x}", self.v_reg.get().0);
     }
 
     fn reset_v_hor(&self) {
         let v = self.v_reg.get();
         let t = self.t_reg.get();
         self.v_reg.set(v.set_x_scroll_with_addr(t));
+        println!("reset hori(v) = {:04x}", self.v_reg.get().0);
     }
 
     fn reset_v_ver(&self) {
         let v = self.v_reg.get();
         let t = self.t_reg.get();
         self.v_reg.set(v.set_y_scroll_with_addr(t));
+        println!("reset vert(v) = {:04x}", self.v_reg.get().0);
+    }
+
+    fn is_rendering(&self) -> bool {
+        self.ppu_mask.get().intersects(PpuMask::RENDER_BACKGROUND | PpuMask::RENDER_SPRITES)
     }
 
     pub async fn run(&self) {
         // Not correctly updating v
+        let mut chunk = [Rgb::new(); 8];
         let mut full_chunk = [Rgb::new(); 16];
         let mut frame = RgbFrame::new();
         let mut odd_frame = true;
         loop {
-            println!("!!!! Start of frame !!!!");
-            // Pre-render (-1, 0)
-            cycles!(self, 1);
-            // Pre-render (-1, 1)
-            self.ppu_status.set(self.ppu_status.get() & !PpuStatus::VBLANK);
-            cycles!(self, 320);
-            // Pre-render (-1, 321) - prefetch next two tiles
-            let mut chunk0 = self.render_line_chunk();
-            self.v_hor_inc();
-            let mut chunk1 = self.render_line_chunk();
-            self.v_hor_inc();
-            full_chunk[0..8].copy_from_slice(&chunk0[0..8]);
-            full_chunk[8..16].copy_from_slice(&chunk1[0..8]);
-            cycles!(self, 16 + 4);
-
-            // Visible lines (0, 0)
-            for l in 0..240 {
-                // Render line (l, 0)
+            // Render lines (-1, 0)
+            for line in -1..240i32 {
+                if line == 0 {
+                    println!("!!!! Start of frame !!!!");
+                }
+                // Render line (line, 0)
                 // Check if skip dot (0, 0)
-                if odd_frame || l > 0 {
+                if odd_frame || line != 0 {
                     cycles!(self, 1);
                 }
 
-                // (l, 1)
-                for i in 0..32 {
-                    // Render chunk
-                    let drawn_chunk = self.apply_fine_x_scroll(&full_chunk);
-                    frame.write_chunk(l, i, drawn_chunk);
-
-                    // Get next chunk
-                    chunk0 = chunk1;
-                    chunk1 = self.render_line_chunk();
-                    full_chunk[0..8].copy_from_slice(&chunk0[0..8]);
-                    full_chunk[8..16].copy_from_slice(&chunk1[0..8]);
-                    cycles!(self, 8);
-                    self.v_hor_inc();
+                // (-1, 1)
+                if line == -1 {
+                    println!("Pre-render line");
+                    self.ppu_status.set(self.ppu_status.get() & !PpuStatus::VBLANK);
+                } else {
+                    println!("Rendered line");
                 }
-                self.v_ver_inc();
-                cycles!(self, 1);
 
-                // (l, 257) hori(v) = hori(t)
-                self.reset_v_hor();
+                // (line, 1)
+                for tile in 0..32 {
+                    if self.is_rendering() {
+                        // Render chunk unless it's the pre-render line
+                        if line != -1 && tile != 31 {
+                            let drawn_chunk = self.apply_fine_x_scroll(&full_chunk);
+                            frame.write_chunk(line as usize, tile as usize, drawn_chunk);
+                        }
+                        // Get next chunk
+                        let last_chunk = &full_chunk[8..16].to_vec();
+                        full_chunk[0..8].copy_from_slice(&last_chunk);
+                        chunk = self.render_line_chunk();
+                        full_chunk[8..16].copy_from_slice(&chunk[0..8]);
+                        cycles!(self, 7);
+
+                        // (line, 256)
+                        if tile == 31 {
+                            self.v_ver_inc();
+                        }
+                        self.v_hor_inc();
+                        cycles!(self, 1);
+                    } else {
+                        cycles!(self, 8);
+                    }
+                }
+
+                // (line, 257)
+                if self.is_rendering() {
+                    self.reset_v_hor();
+                }
+                cycles!(self, 23);
+
+                // (line == -1, 280 - 304) We reset the v addr constantly here
+                if line == -1 && self.is_rendering() {
+                    for _ in 0..24 {
+                        self.reset_v_ver();
+                        cycles!(self, 1);
+                    }
+                } else {
+                    cycles!(self, 24);
+                }
+
+                cycles!(self, 17);
+
+                // (line, 321) Chunks for next line
+
+                // Get next chunk
+                if self.is_rendering() {
+                    full_chunk[0..8].copy_from_slice(&self.render_line_chunk());
+                    cycles!(self, 7);
+                    self.v_hor_inc();
+                    cycles!(self, 1);
+                    full_chunk[8..16].copy_from_slice(&self.render_line_chunk());
+                    cycles!(self, 7);
+                    self.v_hor_inc();
+                    cycles!(self, 1);
+                } else {
+                    cycles!(self, 16);
+                }
 
                 // (l, 256) Nothing really happens for the rest of the line
                 cycles!(self, 84);
@@ -384,15 +450,16 @@ impl Ppu {
             3 => self.oam_addr.set(val),
             4 => self.write_oam(val),
             5 => {
-                let mut t = self.t_reg.get();
+                let t = self.t_reg.get();
                 self.t_reg.set(if !write_toggle {
                     println!("Writing {:02x} to PPU_SCROLL X", val);
-                    let (t, x_fine) = t.set_x_scroll(val);
+                    t.set_x_course(val as u16);
+                    let x_fine = 0b0111 & val;
                     self.x_fine_reg.set(x_fine);
                     t
                 } else {
                     println!("Writing {:02x} to PPU_SCROLL Y", val);
-                    t.set_y_scroll(val)
+                    t.set_y(val as u16)
                 });
                 self.write_toggle.set(!write_toggle);
             },
@@ -400,8 +467,8 @@ impl Ppu {
                 let mut t = self.t_reg.get().0;
                 if !write_toggle {
                     println!("Writing {:02x} to PPU_ADDR MSB", val);
-                    t &= !0xff00;
-                    t |= (val as u16) << 8;
+                    t &= !0xff00; // Clear MSB byte
+                    t |= ((val & 0b00111111) as u16) << 8; // Set MSB bytes but clear bits above bit 13
                 } else {
                     println!("Writing {:02x} to PPU_ADDR LSB", val);
                     t &= !0x00ff;
