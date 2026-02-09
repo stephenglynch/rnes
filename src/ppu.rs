@@ -231,26 +231,22 @@ impl Ppu {
 
     fn v_hor_inc(&self) {
         self.v_reg.set(self.v_reg.get().add_x_course(8));
-        println!("inc hori(v) = {:04x}", self.v_reg.get().0);
     }
 
     fn v_ver_inc(&self) {
         self.v_reg.set(self.v_reg.get().add_y(1));
-        println!("inc vert(v) = {:04x}", self.v_reg.get().0);
     }
 
     fn reset_v_hor(&self) {
         let v = self.v_reg.get();
         let t = self.t_reg.get();
         self.v_reg.set(v.set_x_scroll_with_addr(t));
-        println!("reset hori(v) = {:04x}", self.v_reg.get().0);
     }
 
     fn reset_v_ver(&self) {
         let v = self.v_reg.get();
         let t = self.t_reg.get();
         self.v_reg.set(v.set_y_scroll_with_addr(t));
-        println!("reset vert(v) = {:04x}", self.v_reg.get().0);
     }
 
     fn is_rendering(&self) -> bool {
@@ -266,9 +262,6 @@ impl Ppu {
         loop {
             // Render lines (-1, 0)
             for line in -1..240i32 {
-                if line == 0 {
-                    println!("!!!! Start of frame !!!!");
-                }
                 // Render line (line, 0)
                 // Check if skip dot (0, 0)
                 if odd_frame || line != 0 {
@@ -277,10 +270,7 @@ impl Ppu {
 
                 // (-1, 1)
                 if line == -1 {
-                    println!("Pre-render line");
                     self.ppu_status.set(self.ppu_status.get() & !PpuStatus::VBLANK);
-                } else {
-                    println!("Rendered line");
                 }
 
                 // (line, 1)
@@ -347,7 +337,7 @@ impl Ppu {
                 cycles!(self, 84);
             }
 
-            println!("!!!! Start of v-blank !!!!");
+            // This marks end of rendering and start of V-blank
             // Post-render line (240, 0)
             cycles!(self, 340 + 1);
             // Post-render line (241, 1)
@@ -453,13 +443,11 @@ impl Ppu {
             5 => {
                 let t = self.t_reg.get();
                 self.t_reg.set(if !write_toggle {
-                    println!("Writing {:02x} to PPU_SCROLL X", val);
                     t.set_x_course(val as u16);
                     let x_fine = 0b0111 & val;
                     self.x_fine_reg.set(x_fine);
                     t
                 } else {
-                    println!("Writing {:02x} to PPU_SCROLL Y", val);
                     t.set_y(val as u16)
                 });
                 self.write_toggle.set(!write_toggle);
@@ -467,11 +455,9 @@ impl Ppu {
             6 => {
                 let mut t = self.t_reg.get().0;
                 if !write_toggle {
-                    println!("Writing {:02x} to PPU_ADDR MSB", val);
                     t &= !0xff00; // Clear MSB byte
                     t |= ((val & 0b00111111) as u16) << 8; // Set MSB bytes but clear bits above bit 13
                 } else {
-                    println!("Writing {:02x} to PPU_ADDR LSB", val);
                     t &= !0x00ff;
                     t |= val as u16;
                 };
@@ -481,7 +467,6 @@ impl Ppu {
                 self.v_reg.set(t);
             },
             7 => {
-                println!("Writing to address: {:04x}", self.v_reg.get().0);
                 self.mmu_store(self.v_reg.get().0, val);
                 self.v_addr_increment();
             },
