@@ -213,7 +213,7 @@ impl Ppu {
             v_reg: Cell::new(VramAddr(0)),
             x_fine_reg: Cell::new(0),
             write_toggle: Cell::new(false),
-            oam_data: RefCell::new(Vec::new()), // TODO change this, just needed to compile
+            oam_data: RefCell::new(vec![0; 256]), // TODO change this, just needed to compile
             chr_rom: RefCell::new(chr_rom),
             ram: RefCell::new(vec![0; 4096]),
             palette_ram: RefCell::new(vec![0; 32]),
