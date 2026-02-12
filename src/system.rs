@@ -1,10 +1,11 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 use bitflags::bitflags;
+use crate::chip::Chip;
 use crate::instructions::{execute, interrupt};
 use crate::ppu::Ppu;
-use crate::apu::Apu;
 use crate::clock::Clock;
+use crate::gamepad_manager::ActiveGamepads;
 
 bitflags! {
     /// Represents a set of flags.
@@ -44,7 +45,7 @@ enum Memory {
     PrgRom,
     PrgRam,
     Oam,
-    ApuRegs,
+    ChipRegs,
     PpuRegs,
 }
 
@@ -55,19 +56,19 @@ pub struct Cpu {
     ram: Vec<u8>,
     prg_rom: Vec<u8>,
     prg_ram: Vec<u8>,
-    apu: Apu,
+    chip: Chip,
     ppu: Rc<Ppu>
 }
 
 impl Cpu {
-    pub fn new(clock: Rc<RefCell<Clock>>, prg_rom: Vec<u8>, ppu: Rc<Ppu>) -> Self {
+    pub fn new(clock: Rc<RefCell<Clock>>, prg_rom: Vec<u8>, ppu: Rc<Ppu>, active_gamepads: ActiveGamepads) -> Self {
         let mut cpu = Cpu {
             clock: clock.clone(),
             registers: Registers::new(),
             ram: vec![0; 2048],
             prg_rom: prg_rom,
             prg_ram: vec![0; 2048],
-            apu: Apu::new(),
+            chip: Chip::new(active_gamepads),
             ppu: ppu,
             nmi_ff: false
         };
@@ -96,7 +97,7 @@ impl Cpu {
             0x0000..0x2000 => (Memory::Ram, addr & 0xfff),
             0x2000..0x4000 => (Memory::PpuRegs, addr & 0x0007),
             0x4014         => (Memory::Oam, 0),
-            0x4000..0x401f => (Memory::ApuRegs, addr & 0x00ff),
+            0x4000..0x401f => (Memory::ChipRegs, addr & 0x001f),
             0x401f..0x6000 => panic!("Unused - what behaviour should occur here?"),
             0x6000..0x8000 => (Memory::PrgRam, addr & 0xfff),
             0x8000..0xc000 => (Memory::PrgRom, addr & 0x3fff),
@@ -111,7 +112,7 @@ impl Cpu {
             Memory::Ram => self.ram[loc],
             Memory::PrgRam => self.prg_ram[loc],
             Memory::PrgRom => self.prg_rom[loc],
-            Memory::ApuRegs => 0,
+            Memory::ChipRegs => self.chip.get_reg(loc),
             Memory::PpuRegs => self.ppu.get_reg(loc),
             Memory::Oam => 0,
         }
@@ -123,7 +124,7 @@ impl Cpu {
             Memory::Ram => self.ram[loc] = val,
             Memory::PrgRam => self.prg_ram[loc] = val,
             Memory::PrgRom => self.prg_rom[loc] = val,
-            Memory::ApuRegs => (),
+            Memory::ChipRegs => self.chip.set_reg(loc, val),
             Memory::PpuRegs => self.ppu.set_reg(loc, val),
             Memory::Oam => self.oam_transfer(val)
         }
@@ -164,8 +165,8 @@ impl Cpu {
             let p = self.registers.sr.bits();
             let sp = self.registers.sp;
             let cycle = self.clock.borrow().current_cycle / 3;
-            println!("{:04x} op: {:02x} A: {:02x} X: {:02x} Y: {:02x} P: {:02x} SP = {:02x} cycle = {:}",
-                pc, self.mmu_load(pc), a, x, y, p, sp, cycle);
+            // println!("{:04x} op: {:02x} A: {:02x} X: {:02x} Y: {:02x} P: {:02x} SP = {:02x} cycle = {:}",
+            //     pc, self.mmu_load(pc), a, x, y, p, sp, cycle);
             let next_instruction = self.mmu_load(pc);
             execute(&mut self, next_instruction).await;
         }

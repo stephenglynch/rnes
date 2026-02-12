@@ -10,19 +10,24 @@ use crate::system::Cpu;
 use crate::parse_ines::INes;
 use crate::clock::Clock;
 use crate::renderer::Renderer;
+use crate::gamepad_manager::GamepadManager;
 
-const CYCLES_TO_RUN: usize = 1000000;
+const CYCLES_TO_RUN: usize = 100000000;
 
 pub fn execute_rom(ines: INes) {
     // Create renderer
     let renderer = Renderer::new();
     let frame_buffer = renderer.get_frame_buffer();
 
+    let gamepad_manager = GamepadManager::new();
+    let gamepads = gamepad_manager.get_gamepads();
+    gamepad_manager.start();
+
     thread::spawn(move || {
         // Build NES components
         let clock = Rc::new(RefCell::new(Clock::new()));
         let ppu = Rc::new(Ppu::new(clock.clone(), ines.chr_rom.unwrap(), frame_buffer));
-        let cpu = Cpu::new(clock.clone(), ines.prg_rom, ppu.clone());
+        let cpu = Cpu::new(clock.clone(), ines.prg_rom, ppu.clone(), gamepads);
 
         // Create "async" pool to handle clock cycles
         let mut pool = LocalPool::new();
