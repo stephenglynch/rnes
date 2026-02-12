@@ -1,4 +1,3 @@
-// TODO: Implement sampling of gamepad
 // TOOD: Implement APU
 use crate::gamepad_manager::ActiveGamepads;
 
