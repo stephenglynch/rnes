@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use pixels::{Error, Pixels, SurfaceTexture};
 use winit::dpi::LogicalSize;
 use winit::event::{Event, WindowEvent};
@@ -10,22 +10,21 @@ use crate::ppu::{WIDTH, HEIGHT};
 
 /// Representation of the application state. In this example, a box will bounce around the screen.
 
+pub type FrameBuffer = Arc<Mutex<[u8; WIDTH * HEIGHT * 4]>>;
+
 pub struct Renderer {
-    rx: mpsc::Receiver<Vec<u8>>,
-    tx: mpsc::Sender<Vec<u8>>
+    frame: FrameBuffer
 }
 
 impl Renderer {
     pub fn new() -> Self {
-        let (tx, rx) = mpsc::channel();
-        Renderer {
-            tx: tx,
-            rx: rx
+        Self {
+            frame: Arc::new(Mutex::new([0; WIDTH * HEIGHT * 4]))
         }
     }
 
-    pub fn get_frame_sender(&self) -> mpsc::Sender<Vec<u8>> {
-        self.tx.clone()
+    pub fn get_frame_buffer(&self) -> FrameBuffer {
+        self.frame.clone()
     }
 
     pub fn run(self) -> Result<(), Error> {
@@ -88,9 +87,10 @@ impl Renderer {
 
     fn render_frame(&self, pixels: &mut Pixels<'_>) -> Result<(), Error> {
         // Get frame buffer and render
-        if let Ok(frame) = self.rx.try_recv() {
-            let pixels_frame = pixels.frame_mut();
-            pixels_frame.clone_from_slice(&frame);
+        let pixels_frame = pixels.frame_mut();
+        {
+            let frame = self.frame.lock().unwrap();
+            pixels_frame.copy_from_slice(frame.as_slice());
         }
         pixels.render()
     }

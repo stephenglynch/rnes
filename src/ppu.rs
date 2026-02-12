@@ -1,8 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::mpsc;
 use bitflags::bitflags;
 use crate::clock::{Clock, CycleDelay};
+use crate::renderer::FrameBuffer;
 
 pub const WIDTH: usize = 256;
 pub const HEIGHT: usize = 240;
@@ -190,7 +190,7 @@ pub struct Ppu {
     ram: RefCell<Vec<u8>>,
     palette_ram: RefCell<Vec<u8>>,
     oam_data: RefCell<Vec<u8>>,
-    frame_sender: mpsc::Sender<Vec<u8>>
+    frame_buffer: FrameBuffer
 }
 
 enum Memory {
@@ -201,7 +201,7 @@ enum Memory {
 
 
 impl Ppu {
-    pub fn new(clock: Rc<RefCell<Clock>>, chr_rom: Vec<u8>, frame_sender: mpsc::Sender<Vec<u8>>) -> Self {
+    pub fn new(clock: Rc<RefCell<Clock>>, chr_rom: Vec<u8>, frame_buffer: FrameBuffer) -> Self {
         Self {
             //TODO: To be more accurate these should initialise to random values
             clock: clock,
@@ -217,7 +217,7 @@ impl Ppu {
             chr_rom: RefCell::new(chr_rom),
             ram: RefCell::new(vec![0; 4096]),
             palette_ram: RefCell::new(vec![0; 32]),
-            frame_sender: frame_sender
+            frame_buffer: frame_buffer
         }
     }
 
@@ -344,10 +344,15 @@ impl Ppu {
             self.ppu_status.set(self.ppu_status.get() | PpuStatus::VBLANK);
             cycles!(self, 340 + 341 * 19);
 
-            self.frame_sender.send(frame.to_rgb_frame()).unwrap();
+            self.write_to_frame_buffer(&frame);
 
             odd_frame = !odd_frame;
         }
+    }
+
+    fn write_to_frame_buffer(&self, frame: &RgbFrame) {
+        let mut frame_buffer = self.frame_buffer.lock().unwrap();
+        frame_buffer.copy_from_slice(&frame.to_rgb_frame());
     }
 
     fn mmu_resolve(&self, addr: u16) -> (Memory, usize) {

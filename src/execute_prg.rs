@@ -16,12 +16,12 @@ const CYCLES_TO_RUN: usize = 1000000;
 pub fn execute_rom(ines: INes) {
     // Create renderer
     let renderer = Renderer::new();
-    let frame_sender = renderer.get_frame_sender();
+    let frame_buffer = renderer.get_frame_buffer();
 
     thread::spawn(move || {
         // Build NES components
         let clock = Rc::new(RefCell::new(Clock::new()));
-        let ppu = Rc::new(Ppu::new(clock.clone(), ines.chr_rom.unwrap(), frame_sender));
+        let ppu = Rc::new(Ppu::new(clock.clone(), ines.chr_rom.unwrap(), frame_buffer));
         let cpu = Cpu::new(clock.clone(), ines.prg_rom, ppu.clone());
 
         // Create "async" pool to handle clock cycles
