@@ -480,21 +480,21 @@ async fn rts(sys: &mut Cpu) {
 
 // Interrupts
 pub async fn interrupt(sys: &mut Cpu, int_vec: u16) {
-        // TODO: Not sure I'm handling the Break flag correctly
-        let ret_addr = sys.registers.pc + 2;
-        let ret_addr_hi = ((ret_addr & 0xff00) >> 8) as u8;
-        let ret_addr_lo = ret_addr as u8;
-        // Save CPU state to stack
-        push_raw(sys, ret_addr_hi);
-        push_raw(sys, ret_addr_lo);
-        let mut status = sys.registers.sr;
-        status.set(StatusRegister::BREAK, false);
-        push_raw(sys, status.bits());
-        // Jump to interrupt vector
-        let pc_lo = sys.mmu_load(int_vec) as u16;
-        let pc_hi = sys.mmu_load(int_vec + 1) as u16;
-        sys.registers.pc = pc_lo | (pc_hi << 8);
-        cycles!(sys, 1);
+    // TODO: Not sure I'm handling the Break flag correctly
+    let ret_addr = sys.registers.pc;
+    let ret_addr_hi = ((ret_addr & 0xff00) >> 8) as u8;
+    let ret_addr_lo = ret_addr as u8;
+    // Save CPU state to stack
+    push_raw(sys, ret_addr_hi);
+    push_raw(sys, ret_addr_lo);
+    let mut status = sys.registers.sr;
+    status.set(StatusRegister::BREAK, false);
+    push_raw(sys, status.bits());
+    // Jump to interrupt vector
+    let pc_lo = sys.mmu_load(int_vec) as u16;
+    let pc_hi = sys.mmu_load(int_vec + 1) as u16;
+    sys.registers.pc = pc_lo | (pc_hi << 8);
+    cycles!(sys, 1);
 }
 
 async fn brk(sys: &mut Cpu) {
