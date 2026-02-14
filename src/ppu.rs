@@ -1,8 +1,13 @@
+// TODO: Support palettes
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use bitflags::bitflags;
 use crate::clock::{Clock, CycleDelay};
 use crate::renderer::FrameBuffer;
+use palette::{Rgb, PaletteRam, Colour};
+
+mod palette;
 
 pub const WIDTH: usize = 256;
 pub const HEIGHT: usize = 240;
@@ -48,20 +53,6 @@ bitflags! {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct Rgb {
-    pub red: u8,
-    pub blue: u8,
-    pub green: u8
-}
-
-impl Rgb {
-    fn new() -> Self {
-        Rgb {red: 0, blue: 0, green: 0}
-    }
-}
-
-
 pub struct RgbFrame([Rgb; WIDTH * HEIGHT]);
 
 impl RgbFrame {
@@ -77,17 +68,9 @@ impl RgbFrame {
 
     pub fn to_rgb_frame(&self) -> Vec<u8> {
         self.0.iter().flat_map(|rgb| {
-            [rgb.red, rgb.green, rgb.blue, 0xff]
+            [rgb.0, rgb.1, rgb.2, 0xff]
         }).collect()
     }
-}
-
-#[derive(Clone, Copy)]
-enum PalletId {
-    Transparent,
-    Pallet1,
-    Pallet2,
-    Pallet3
 }
 
 #[derive(Clone, Copy)]
@@ -188,7 +171,7 @@ pub struct Ppu {
     clock: Rc<RefCell<Clock>>,
     chr_rom: RefCell<Vec<u8>>,
     ram: RefCell<Vec<u8>>,
-    palette_ram: RefCell<Vec<u8>>,
+    palette_ram: RefCell<PaletteRam>,
     oam_data: RefCell<Vec<u8>>,
     frame_buffer: FrameBuffer
 }
@@ -216,7 +199,7 @@ impl Ppu {
             oam_data: RefCell::new(vec![0; 256]), // TODO change this, just needed to compile
             chr_rom: RefCell::new(chr_rom),
             ram: RefCell::new(vec![0; 4096]),
-            palette_ram: RefCell::new(vec![0; 32]),
+            palette_ram: RefCell::new(PaletteRam::new()),
             frame_buffer: frame_buffer
         }
     }
@@ -255,7 +238,7 @@ impl Ppu {
 
     pub async fn run(&self) {
         // Not correctly updating v
-        let mut chunk = [Rgb::new(); 8];
+        let mut chunk;
         let mut full_chunk = [Rgb::new(); 16];
         let mut frame = RgbFrame::new();
         let mut odd_frame = true;
@@ -371,7 +354,7 @@ impl Ppu {
         match mem {
             Memory::ChrRom => self.chr_rom.borrow()[addr],
             Memory::Ram => self.ram.borrow()[addr],
-            Memory::PaletteRam => self.palette_ram.borrow()[addr]
+            Memory::PaletteRam => self.palette_ram.borrow().get(addr)
         }
     }
 
@@ -380,8 +363,18 @@ impl Ppu {
         match mem {
             Memory::ChrRom => (), // Do nothing if writing into ROM
             Memory::Ram => self.ram.borrow_mut()[addr] = val,
-            Memory::PaletteRam => self.palette_ram.borrow_mut()[addr] =val
+            Memory::PaletteRam => self.palette_ram.borrow_mut().set(addr, val),
         }
+    }
+
+    fn palette_lookup(&self, course_x: u16, course_y: u16, nt_sel: u16) -> usize {
+        let at = self.mmu_load((course_x >> 2) | ((course_y >> 2) << 3) | (nt_sel << 6) | 0x23c0);
+        (match (course_x & 0b10 != 0, course_y & 0b10 != 0) {
+            (false, false) => at & 0b00000011,
+            (false, true)  => (at & 0b00110000) >> 4,
+            (true, false)  => (at & 0b00001100) >> 2,
+            (true, true)   => (at & 0b11000000) >> 6,
+        }) as usize
     }
 
     fn render_line_chunk(&self) -> [Rgb; 8] {
@@ -391,25 +384,35 @@ impl Ppu {
         let course_y = (v >> 5) & 0b11111;
         let nt_sel = (v >> 10) & 0b11;
         let fine_y = (v >> 12) & 0b111;
+
         // Fetch nametable byte
         let nt = self.mmu_load((v & 0x0fff) | 0x2000) as u16;
-        // Fetch attribute byte
-        let at = self.mmu_load((course_x >> 2) | ((course_y >> 2) << 3) | (nt_sel << 6) | 0x23c0);
+
+        // Fetch palette from attribute byte
+        let palette = self.palette_lookup(course_x, course_y, nt_sel);
+
         // Fetch pattern bytes
         let half = self.ppu_ctrl.get().contains(PpuCtrl::BACKGROUND_SEL) as u16;
         let pattern_0 = self.mmu_load((half << 12) | (nt << 4) | 0x0 | (fine_y));
         let pattern_1 = self.mmu_load((half << 12) | (nt << 4) | 0x8 | (fine_y));
-        // Fetch pixel colour
 
+        let background_rgb = self.palette_ram.borrow().background_colour();
+
+        // Fetch pixel colour
         for bit in 0..8 {
             let col_sel_0 = pattern_0 & (1 << bit) != 0;
             let col_sel_1 = pattern_1 & (1 << bit) != 0;
-            rgb_chunk[bit] = match (col_sel_0, col_sel_1) {
-                (false, false) => Rgb {red: 0, blue: 0, green: 0},
-                (false, true)  => Rgb {red: 255, blue: 0, green: 0},
-                (true, false)  => Rgb {red: 0, blue: 255, green: 0},
-                (true, true)   => Rgb {red: 0, blue: 0, green: 255},
-            }
+            let bit_colour = match (col_sel_1, col_sel_0) {
+                (false, false) => self.palette_ram.borrow().rgb_lookup(palette, 0b00, false),
+                (false, true)  => self.palette_ram.borrow().rgb_lookup(palette, 0b01, false),
+                (true, false)  => self.palette_ram.borrow().rgb_lookup(palette, 0b10, false),
+                (true, true)   => self.palette_ram.borrow().rgb_lookup(palette, 0b11, false)
+            };
+
+            rgb_chunk[bit] = match bit_colour {
+                Colour::Rgb(rgb) => rgb,
+                Colour::Transparent => background_rgb,
+            };
         }
 
         rgb_chunk
