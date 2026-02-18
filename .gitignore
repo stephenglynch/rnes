@@ -24,3 +24,7 @@ target
 # Added by cargo
 
 /target
+
+# Flamegraph output
+cargo-flamegraph.trace
+flamegraph.svg
