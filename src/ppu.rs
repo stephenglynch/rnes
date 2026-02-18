@@ -186,7 +186,7 @@ enum Memory {
 impl Ppu {
     pub fn new(clock: Rc<RefCell<Clock>>, chr_rom: Vec<u8>, frame_buffer: FrameBuffer) -> Self {
         Self {
-            //TODO: To be more accurate these should initialise to random values
+            //TODO: Confirm the intialisation values agianst power-on values
             clock: clock,
             ppu_ctrl: Cell::new(PpuCtrl::from_bits_retain(0)),
             ppu_mask: Cell::new(PpuMask::from_bits_retain(0)),
@@ -196,7 +196,7 @@ impl Ppu {
             v_reg: Cell::new(VramAddr(0)),
             x_fine_reg: Cell::new(0),
             write_toggle: Cell::new(false),
-            oam_data: RefCell::new(vec![0; 256]), // TODO change this, just needed to compile
+            oam_data: RefCell::new(vec![0; 256]),
             chr_rom: RefCell::new(chr_rom),
             ram: RefCell::new(vec![0; 4096]),
             palette_ram: RefCell::new(PaletteRam::new()),

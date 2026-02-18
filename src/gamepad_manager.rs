@@ -1,3 +1,7 @@
+// TODO: Add keyboard support
+// TODO: Support normal gamepads
+// TODO: Add abstracion layer to what a gamepad is
+
 use gilrs::{Gilrs, Event, EventType};
 use std::thread;
 use std::collections::VecDeque;
