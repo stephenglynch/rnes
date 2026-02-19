@@ -1,5 +1,6 @@
 // TODO: Doesn't seem to load the instruction space correctly for Donkey Kong
 use std::fs::read;
+use std::path::Path;
 use bitflags::bitflags;
 
 bitflags! {
@@ -29,7 +30,7 @@ pub struct INes {
     pub chr_rom: Option<Vec<u8>>,
 }
 
-pub fn read_ines(filename: &str) -> Option<INes> {
+pub fn read_ines(filename: &Path) -> Option<INes> {
     let raw = read(filename).unwrap();
 
     // Check if file contains magic sequence
