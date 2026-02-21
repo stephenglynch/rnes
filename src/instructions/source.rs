@@ -33,6 +33,7 @@ impl <A: AddrMode> Source<A> for StackPointer {
     }
 }
 
+#[allow(dead_code)]
 pub struct StatusRegister;
 impl <A: AddrMode> Source<A> for StatusRegister {
     fn get(sys: &mut Cpu, _addr_mode: &mut A) -> u8 {

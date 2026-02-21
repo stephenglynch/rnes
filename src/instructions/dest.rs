@@ -27,6 +27,7 @@ impl <A: AddrMode> Dest<A> for IndexY {
     }
 }
 
+#[allow(dead_code)]
 pub struct StackPointer;
 impl <A: AddrMode> Dest<A> for StackPointer {
     fn set(sys: &mut Cpu, _addr_mode: &mut A, val: u8) {
@@ -34,6 +35,7 @@ impl <A: AddrMode> Dest<A> for StackPointer {
     }
 }
 
+#[allow(dead_code)]
 pub struct StatusRegister;
 impl <A: AddrMode> Dest<A> for StatusRegister {
     fn set(sys: &mut Cpu, _addr_mode: &mut A, val: u8) {
