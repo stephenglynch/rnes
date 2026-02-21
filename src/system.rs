@@ -8,11 +8,11 @@ use crate::clock::Clock;
 use crate::gamepad_manager::ActiveGamepads;
 
 // Awaits a certain number of CPU clocks cycles (3x PPU cycles)
-macro_rules! cycles {
-    ($sys:expr, $n:expr) => {
-        CycleDelay::new($sys.clock.clone(), $n * 3).await
-    }
-}
+// macro_rules! cycles {
+//     ($sys:expr, $n:expr) => {
+//         CycleDelay::new($sys.clock.clone(), $n * 3).await
+//     }
+// }
 
 bitflags! {
     /// Represents a set of flags.
@@ -125,7 +125,7 @@ impl Cpu {
         }
     }
 
-    pub async fn mmu_store(&mut self, addr: u16, val: u8) {
+    pub fn mmu_store(&mut self, addr: u16, val: u8) {
         let (mem, loc) = self.mmu_resolve(addr);
         match mem {
             Memory::Ram => self.ram[loc] = val,
@@ -133,20 +133,20 @@ impl Cpu {
             Memory::PrgRom => self.prg_rom[loc] = val,
             Memory::ChipRegs => self.chip.set_reg(loc, val),
             Memory::PpuRegs => self.ppu.set_reg(loc, val),
-            Memory::Oam => self.oam_transfer(val).await
+            Memory::Oam => self.oam_transfer(val)
         }
     }
 
-    async fn oam_transfer(&mut self, hi_addr: u8) {
+    fn oam_transfer(&mut self, hi_addr: u8) {
         // TODO: this consumes some number of cycles
         let hi_addr = hi_addr as u16;
         for lo_addr in 0..256 {
             let addr = (hi_addr << 8) | lo_addr;
             let val = self.mmu_load(addr);
             self.ppu.write_oam(val);
-            cycles!(self, 2);
+            // cycles!(self, 2);
         }
-        cycles!(self, 2);
+        // cycles!(self, 2);
     }
 
     pub async fn run(mut self) {

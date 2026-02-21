@@ -498,7 +498,7 @@ pub async fn interrupt(sys: &mut Cpu, int_vec: u16) {
 }
 
 async fn brk(sys: &mut Cpu) {
-    interrupt(sys, 0xfffe).await;
+    interrupt(sys, 0xfffe);
 }
 
 async fn rti(sys: &mut Cpu) {
