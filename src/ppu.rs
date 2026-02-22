@@ -171,16 +171,18 @@ impl VramAddr {
     }
 
     fn set_x_scroll_with_addr(&self, other: Self) -> Self {
-        let mut new_v = self.0 & !0b00001100_00011111;
+        let mask = 0b00001100_00011111;
+        let mut new_v = self.0 & !mask;
         let other = other.0;
-        new_v |= other & 0b00001100_00011111;
+        new_v |= other & mask;
         VramAddr(new_v)
     }
 
     fn set_y_scroll_with_addr(&self, other: Self) -> Self {
-        let mut new_v = self.0 & !0b01110011_11100000;
+        let mask = 0b01110011_11100000;
+        let mut new_v = self.0 & !mask;
         let other = other.0;
-        new_v |= other & 0b01110011_11100000;
+        new_v |= other & mask;
         VramAddr(new_v)
     }
 }
@@ -424,10 +426,12 @@ impl Ppu {
         colour
     }
 
+    #[inline(never)]
     fn combine_drawn_layers(&self, background: [Colour; 8], sprite: [Colour; 8]) -> [Rgb; 8] {
         let backdrop = self.palette_ram.borrow().backdrop_colour();
-        background.iter().zip(sprite.iter()).map(|pair| {
-            match pair {
+        let mut drawn_chunk = [Rgb::new(); 8];
+        background.iter().zip(sprite.iter()).enumerate().for_each(|(i, pair)| {
+            drawn_chunk[i] = match pair {
                 (Colour::Transparent, Colour::Transparent) => backdrop,
                 (Colour::Rgb(_), Colour::Sprite0(sprite_rgb)) => {
                     self.ppu_status.set(self.ppu_status.get() | PpuStatus::SPRITE_0_HIT);
@@ -439,7 +443,8 @@ impl Ppu {
                 (Colour::Rgb(bg_rgb), Colour::Transparent) => *bg_rgb,
                 _ => panic!("No match for {:?}", pair)
             }
-        }).collect::<ArrayVec<Rgb, 8>>().into_inner().unwrap()
+        });
+        drawn_chunk
     }
 
     fn v_addr_increment(&self) {
@@ -461,6 +466,7 @@ impl Ppu {
     pub fn set_reg(&self, addr: usize, val: u8) {
         let write_toggle = self.write_toggle.get();
         match addr {
+            // PPUCTRL
             0 => {
                 self.ppu_ctrl.set(PpuCtrl::from_bits_retain(val));
                 let mut t = self.t_reg.get().0;
@@ -468,14 +474,19 @@ impl Ppu {
                 t |= (val as u16 & 0b00000011) << 10; // Set the new nametable bits
                 self.t_reg.set(VramAddr(t));
             },
+            // PPUMASK
             1 => self.ppu_mask.set(PpuMask::from_bits_retain(val)),
+            // PPUSTATUS
             2 => (),
+            // OAMADDR
             3 => self.oam_addr.set(val),
+            // OAMDATA
             4 => self.write_oam(val),
+            // PPUSCROLL
             5 => {
                 let t = self.t_reg.get();
                 self.t_reg.set(if !write_toggle {
-                    t.set_x_course(val as u16);
+                    let t = t.set_x_course(val as u16);
                     let x_fine = 0b0111 & val;
                     self.x_fine_reg.set(x_fine);
                     t
@@ -484,20 +495,22 @@ impl Ppu {
                 });
                 self.write_toggle.set(!write_toggle);
             },
+            // PPUADDR
             6 => {
                 let mut t = self.t_reg.get().0;
                 if !write_toggle {
                     t &= !0xff00; // Clear MSB byte
                     t |= ((val & 0b00111111) as u16) << 8; // Set MSB bytes but clear bits above bit 13
+                    self.t_reg.set(VramAddr(t));
                 } else {
                     t &= !0x00ff;
                     t |= val as u16;
+                    self.t_reg.set(VramAddr(t));
+                    self.v_reg.set(VramAddr(t));
                 };
                 self.write_toggle.set(!write_toggle);
-                let t = VramAddr(t);
-                self.t_reg.set(t);
-                self.v_reg.set(t);
             },
+            // PPUDATA
             7 => {
                 self.mmu_store(self.v_reg.get().0, val);
                 self.v_addr_increment();
@@ -508,13 +521,21 @@ impl Ppu {
 
     pub fn get_reg(&self, addr: usize) -> u8 {
         match addr {
+            // PPUCTRL
             0 => 0,
+            // PPUMASK
             1 => 0,
+            // PPUSTATUS
             2 => self.read_status(),
+            // OAMADDR
             3 => 0,
+            // OAMDATA
             4 => self.read_oam(),
+            // PPUSCROLL
             5 => 0,
+            // PPUADDR
             6 => 0,
+            // PPUDATA
             7 => {
                 let val = self.mmu_load(self.v_reg.get().0);
                 self.v_addr_increment();
