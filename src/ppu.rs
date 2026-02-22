@@ -2,12 +2,15 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use arrayvec::ArrayVec;
 use bitflags::bitflags;
 use crate::clock::{Clock, CycleDelay};
 use crate::renderer::FrameBuffer;
 use palette::{Rgb, PaletteRam, Colour};
+use oam::Oam;
 
 mod palette;
+mod oam;
 
 pub const WIDTH: usize = 256;
 pub const HEIGHT: usize = 240;
@@ -169,10 +172,10 @@ pub struct Ppu {
 
     // Other resources
     clock: Rc<RefCell<Clock>>,
-    chr_rom: RefCell<Vec<u8>>,
+    chr_rom: Rc<RefCell<Vec<u8>>>,
     ram: RefCell<Vec<u8>>,
-    palette_ram: RefCell<PaletteRam>,
-    oam_data: RefCell<Vec<u8>>,
+    palette_ram: Rc<RefCell<PaletteRam>>,
+    oam: RefCell<Oam>,
     frame_buffer: FrameBuffer
 }
 
@@ -185,6 +188,8 @@ enum Memory {
 
 impl Ppu {
     pub fn new(clock: Rc<RefCell<Clock>>, chr_rom: Vec<u8>, frame_buffer: FrameBuffer) -> Self {
+        let chr = Rc::new(RefCell::new(chr_rom));
+        let palette_ram = Rc::new(RefCell::new(PaletteRam::new()));
         Self {
             //TODO: Confirm the intialisation values agianst power-on values
             clock: clock,
@@ -196,17 +201,17 @@ impl Ppu {
             v_reg: Cell::new(VramAddr(0)),
             x_fine_reg: Cell::new(0),
             write_toggle: Cell::new(false),
-            oam_data: RefCell::new(vec![0; 256]),
-            chr_rom: RefCell::new(chr_rom),
+            oam: RefCell::new(Oam::new(chr.clone(), palette_ram.clone())),
+            chr_rom: chr,
             ram: RefCell::new(vec![0; 4096]),
-            palette_ram: RefCell::new(PaletteRam::new()),
+            palette_ram: palette_ram,
             frame_buffer: frame_buffer
         }
     }
 
-    fn apply_fine_x_scroll(&self, full_chunk: &[Rgb; 16]) -> [Rgb; 8] {
+    fn apply_fine_x_scroll(&self, full_chunk: &[Colour; 16]) -> [Colour; 8] {
         let fine_x = self.x_fine_reg.get() as usize;
-        let mut output_chunk = [Rgb::new(); 8];
+        let mut output_chunk = [Colour::new(); 8];
         output_chunk.copy_from_slice(&full_chunk[fine_x..(fine_x + 8)]);
         output_chunk.reverse();
         output_chunk
@@ -239,7 +244,7 @@ impl Ppu {
     pub async fn run(&self) {
         // Not correctly updating v
         let mut chunk;
-        let mut full_chunk = [Rgb::new(); 16];
+        let mut full_chunk = [Colour::new(); 16];
         let mut frame = RgbFrame::new();
         let mut odd_frame = true;
         loop {
@@ -254,14 +259,21 @@ impl Ppu {
                 // (-1, 1)
                 if line == -1 {
                     self.ppu_status.set(self.ppu_status.get() & !PpuStatus::VBLANK);
+                    self.ppu_status.set(self.ppu_status.get() & !PpuStatus::SPRITE_0_HIT);
                 }
 
                 // (line, 1)
+                self.oam.borrow_mut().clear_secondary_oam();
+                if line != -1 {
+                    self.oam.borrow_mut().populate_secondary_oam(line as usize);
+                }
                 for tile in 0..32 {
                     if self.is_rendering() {
                         // Render chunk unless it's the pre-render line
                         if line != -1 && tile != 31 {
-                            let drawn_chunk = self.apply_fine_x_scroll(&full_chunk);
+                            let drawn_bg = self.apply_fine_x_scroll(&full_chunk);
+                            let drawn_sprite = self.draw_oam(line as usize, tile as usize);
+                            let drawn_chunk = self.combine_drawn_layers(drawn_bg, drawn_sprite);
                             frame.write_chunk(line as usize, tile as usize, drawn_chunk);
                         }
                         // Get next chunk
@@ -377,9 +389,9 @@ impl Ppu {
         }) as usize
     }
 
-    fn render_line_chunk(&self) -> [Rgb; 8] {
+    fn render_line_chunk(&self) -> [Colour; 8] {
         let v = self.v_reg.get().0;
-        let mut rgb_chunk = [Rgb::new(); 8];
+        let mut colour = [Colour::new(); 8];
         let course_x = (v) & 0b11111;
         let course_y = (v >> 5) & 0b11111;
         let nt_sel = (v >> 10) & 0b11;
@@ -396,8 +408,6 @@ impl Ppu {
         let pattern_0 = self.mmu_load((half << 12) | (nt << 4) | 0x0 | (fine_y));
         let pattern_1 = self.mmu_load((half << 12) | (nt << 4) | 0x8 | (fine_y));
 
-        let background_rgb = self.palette_ram.borrow().background_colour();
-
         // Fetch pixel colour
         for bit in 0..8 {
             let col_sel_0 = pattern_0 & (1 << bit) != 0;
@@ -409,13 +419,28 @@ impl Ppu {
                 (true, true)   => self.palette_ram.borrow().rgb_lookup(palette, 0b11, false)
             };
 
-            rgb_chunk[bit] = match bit_colour {
-                Colour::Rgb(rgb) => rgb,
-                Colour::Transparent => background_rgb,
-            };
+            colour[bit] = bit_colour;
         }
 
-        rgb_chunk
+        colour
+    }
+
+    fn combine_drawn_layers(&self, background: [Colour; 8], sprite: [Colour; 8]) -> [Rgb; 8] {
+        let backdrop = self.palette_ram.borrow().backdrop_colour();
+        background.iter().zip(sprite.iter()).map(|pair| {
+            match pair {
+                (Colour::Transparent, Colour::Transparent) => backdrop,
+                (Colour::Rgb(_), Colour::Sprite0(sprite_rgb)) => {
+                    self.ppu_status.set(self.ppu_status.get() | PpuStatus::SPRITE_0_HIT);
+                    *sprite_rgb
+                },
+                (Colour::Rgb(_), Colour::Rgb(sprite_rgb)) => *sprite_rgb,
+                (Colour::Transparent, Colour::Sprite0(sprite_rgb)) => *sprite_rgb,
+                (Colour::Transparent, Colour::Rgb(sprite_rgb)) => *sprite_rgb,
+                (Colour::Rgb(bg_rgb), Colour::Transparent) => *bg_rgb,
+                _ => panic!("No match for {:?}", pair)
+            }
+        }).collect::<ArrayVec<Rgb, 8>>().into_inner().unwrap()
     }
 
     fn v_addr_increment(&self) {
@@ -507,12 +532,17 @@ impl Ppu {
     }
 
     fn read_oam(&self) -> u8 {
-        self.oam_data.borrow_mut()[self.oam_addr.get() as usize]
+        self.oam.borrow().read(self.oam_addr.get() as usize)
     }
 
     pub fn write_oam(&self, val: u8) {
         let oam_addr = self.oam_addr.get();
-        self.oam_data.borrow_mut()[oam_addr as usize] = val;
+        self.oam.borrow_mut().write(oam_addr as usize, val);
         self.oam_addr.set(oam_addr.wrapping_add(1));
+    }
+
+    fn draw_oam(&self, y: usize, x_course: usize) -> [Colour; 8] {
+        let tile_sel = self.ppu_ctrl.get().contains(PpuCtrl::SPRITE_TILE_SEL);
+        self.oam.borrow().draw_chunk(tile_sel, y, x_course)
     }
 }

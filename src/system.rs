@@ -108,6 +108,7 @@ impl Cpu {
             0x401f..0x6000 => panic!("Unused - what behaviour should occur here?"),
             0x6000..0x8000 => (Memory::PrgRam, addr & 0xfff),
             0x8000..0xc000 => (Memory::PrgRom, addr & 0x3fff),
+            // 0x8000..=0xffff => (Memory::PrgRom, addr & 0x7fff),
             0xc000..=0xffff=> (Memory::PrgRom, prog_rom_len as u16 - 0x4000 + addr & 0x3fff)
         };
         (mem, loc as usize)
@@ -168,12 +169,12 @@ impl Cpu {
 
             // Run next instruction
             let pc = self.registers.pc;
-            let a = self.registers.ac;
-            let x = self.registers.x;
-            let y = self.registers.y;
-            let p = self.registers.sr.bits();
-            let sp = self.registers.sp;
-            let cycle = self.clock.borrow().current_cycle / 3;
+            // let a = self.registers.ac;
+            // let x = self.registers.x;
+            // let y = self.registers.y;
+            // let p = self.registers.sr.bits();
+            // let sp = self.registers.sp;
+            // let cycle = self.clock.borrow().current_cycle / 3;
             // println!("{:04x} op: {:02x} A: {:02x} X: {:02x} Y: {:02x} P: {:02x} SP = {:02x} cycle = {:}",
             //     pc, self.mmu_load(pc), a, x, y, p, sp, cycle);
             let next_instruction = self.mmu_load(pc);

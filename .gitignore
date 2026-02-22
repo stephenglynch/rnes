@@ -28,3 +28,9 @@ target
 # Flamegraph output
 cargo-flamegraph.trace
 flamegraph.svg
+
+# VSCode
+.vscode/
+
+# INES Files
+*.nes

@@ -16,13 +16,14 @@ pub const PALETTE: [Colour; 64] = [
 	rgb!(0xee, 0xe9, 0xa1), rgb!(0xd0, 0xf5, 0x9f), rgb!(0xbb, 0xf5, 0xaf), rgb!(0xb3, 0xf5, 0xcd), rgb!(0xb9, 0xed, 0xf0), rgb!(0xb9, 0xb9, 0xb9), rgb!(0x00, 0x00, 0x00), rgb!(0x00, 0x00, 0x00),
 ];
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Rgb(pub u8, pub u8, pub u8);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Colour {
     Transparent,
     Rgb(Rgb),
+    Sprite0(Rgb)
 }
 
 #[derive(Clone, Copy)]
@@ -45,6 +46,18 @@ impl Rgb {
 }
 
 impl Colour {
+    pub fn new() -> Self {
+        Colour::Transparent
+    }
+
+    pub fn to_sprite0(self) -> Self {
+        match self {
+            Colour::Rgb(rgb) => Colour::Sprite0(rgb),
+            Colour::Sprite0(rgb) => Colour::Sprite0(rgb),
+            Colour::Transparent => Colour::Transparent
+        }
+    }
+
     fn unwrap_rgb(self) -> Rgb {
         if let Colour::Rgb(rgb) = self {
             rgb
@@ -126,7 +139,7 @@ impl PaletteRam {
         }
     }
 
-    pub fn background_colour(&self) -> Rgb {
+    pub fn backdrop_colour(&self) -> Rgb {
         let colour = &self.palettes[0].0[0];
         let entry = colour.unwrap_transparent();
         PALETTE[entry as usize].unwrap_rgb()
