@@ -58,6 +58,37 @@ bitflags! {
 
 pub struct RgbFrame([Rgb; WIDTH * HEIGHT]);
 
+#[derive(Clone, Copy)]
+struct VramAddr(u16);
+
+pub struct Ppu {
+    // CPU regs
+    ppu_ctrl: Cell<PpuCtrl>,
+    ppu_mask: Cell<PpuMask>,
+    ppu_status: Cell<PpuStatus>,
+    oam_addr: Cell<u8>,
+
+    // Loopy regs
+    write_toggle: Cell<bool>,
+    t_reg: Cell<VramAddr>,
+    v_reg: Cell<VramAddr>,
+    x_fine_reg: Cell<u8>,
+
+    // Other resources
+    clock: Rc<RefCell<Clock>>,
+    chr_rom: Rc<RefCell<Vec<u8>>>,
+    ram: RefCell<Vec<u8>>,
+    palette_ram: Rc<RefCell<PaletteRam>>,
+    oam: RefCell<Oam>,
+    frame_buffer: FrameBuffer
+}
+
+enum Memory {
+    ChrRom,
+    Ram,
+    PaletteRam,
+}
+
 impl RgbFrame {
     pub fn new() -> Self {
         RgbFrame([Rgb::new(); WIDTH * HEIGHT])
@@ -75,9 +106,6 @@ impl RgbFrame {
         }).collect()
     }
 }
-
-#[derive(Clone, Copy)]
-struct VramAddr(u16);
 
 impl VramAddr {
 
@@ -156,35 +184,6 @@ impl VramAddr {
         VramAddr(new_v)
     }
 }
-
-pub struct Ppu {
-    // CPU regs
-    ppu_ctrl: Cell<PpuCtrl>,
-    ppu_mask: Cell<PpuMask>,
-    ppu_status: Cell<PpuStatus>,
-    oam_addr: Cell<u8>,
-
-    // Loopy regs
-    write_toggle: Cell<bool>,
-    t_reg: Cell<VramAddr>,
-    v_reg: Cell<VramAddr>,
-    x_fine_reg: Cell<u8>,
-
-    // Other resources
-    clock: Rc<RefCell<Clock>>,
-    chr_rom: Rc<RefCell<Vec<u8>>>,
-    ram: RefCell<Vec<u8>>,
-    palette_ram: Rc<RefCell<PaletteRam>>,
-    oam: RefCell<Oam>,
-    frame_buffer: FrameBuffer
-}
-
-enum Memory {
-    ChrRom,
-    Ram,
-    PaletteRam,
-}
-
 
 impl Ppu {
     pub fn new(clock: Rc<RefCell<Clock>>, chr_rom: Vec<u8>, frame_buffer: FrameBuffer) -> Self {
