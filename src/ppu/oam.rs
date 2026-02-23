@@ -26,7 +26,7 @@ struct Sprite {
     x_pos: u8
 }
 
-type SecondaryOam = ArrayVec<(Sprite, bool), 8>;
+type SecondaryOam = ArrayVec<(Sprite, usize), 8>;
 pub struct Oam {
     chr: Rc<RefCell<Vec<u8>>>,
     palette_ram: Rc<RefCell<PaletteRam>>,
@@ -56,7 +56,7 @@ impl Oam {
             chr: chr,
             palette_ram: palette_ram,
             primary: [Sprite::new(); 64],
-            secondary: SecondaryOam::from([(Sprite::new(), false); 8]),
+            secondary: ArrayVec::new(),
         }
     }
 
@@ -97,8 +97,7 @@ impl Oam {
     pub fn populate_secondary_oam(&mut self, y: usize) -> bool {
         for (i, sprite) in self.primary.iter().enumerate() {
             if sprite.on_scanline(y as u8) {
-                let sprite_zero = i == 0;
-                if self.secondary.try_push((*sprite, sprite_zero)).is_err() {
+                if self.secondary.try_push((*sprite, i)).is_err() {
                     return true;
                 }
             }
@@ -113,18 +112,27 @@ impl Oam {
         let y = (y & 0xff) as i32;
         let x_course = (x_course & 0x1f) as i32;
         let mut pixels = [Colour::new(); 8];
-        for (sprite, sprite_zero) in self.secondary.iter() {
+        for (sprite, sprite_num) in self.secondary.iter() {
+            let flip_x = sprite.attributes.contains(OamAttributes::FLIP_HORIZONTALLY);
+            let flip_y = sprite.attributes.contains(OamAttributes::FLIP_VERTICALLY);
+            let mut sprite_y = y - sprite.y_pos as i32;
+            if flip_y {
+                sprite_y = 7 - sprite_y;
+            }
             let chr = self.chr.borrow();
             let tile_index = sprite.tile_index as usize;
-            let addr = (tile_index << 1) | ((bank_sel as usize) << 3);
+            let addr = (tile_index << 4) | ((bank_sel as usize) << 12);
             let pattern = &chr[addr..(addr + 16)];
-            let sprite_y = y - sprite.y_pos as i32;
+            assert!(sprite_y >= 0 && sprite_y < 8);
             for (x, pixel) in pixels.iter_mut().enumerate() {
                 let palette_id = sprite.attributes & (OamAttributes::PALETTE_0 | OamAttributes::PALETTE_1);
                 let palette_id = palette_id.bits() as usize;
                 // Determine pixel's colour index from pattern
-                let sprite_x = (x_course * 8) + (x as i32) - sprite.x_pos as i32;
-                *pixel = if sprite_x > 0 && sprite_x < 8 {
+                let mut sprite_x = (x_course * 8) + (x as i32) - sprite.x_pos as i32;
+                let new_pixel = if sprite_x >= 0 && sprite_x < 8 {
+                    if !flip_x {
+                        sprite_x = 7 - sprite_x;
+                    }
                     let sprite_y = sprite_y as usize;
                     let bit0 = pattern[sprite_y] & (1 << sprite_x) != 0;
                     let bit1 = pattern[sprite_y + 8] & (1 << sprite_x) != 0;
@@ -132,13 +140,14 @@ impl Oam {
                     // Get colour from palette
                     let palette_ram: std::cell::Ref<'_, PaletteRam> = self.palette_ram.borrow();
                     let mut colour = palette_ram.rgb_lookup(palette_id, colour_id, true);
-                    if *sprite_zero {
+                    if *sprite_num == 0 {
                         colour = colour.to_sprite0();
                     }
                     colour
                 } else {
                     Colour::Transparent
-                }
+                };
+                *pixel = pixel.combine(new_pixel);
             }
         }
         pixels

@@ -65,6 +65,16 @@ impl Colour {
             panic!("Not an Rgb value")
         }
     }
+
+    pub fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Colour::Transparent, Colour::Transparent) => Colour::Transparent,
+            (Colour::Sprite0(rgb), Colour::Transparent) => Colour::Sprite0(rgb),
+            (Colour::Rgb(rgb), Colour::Transparent) => Colour::Rgb(rgb),
+            (_, Colour::Sprite0(rgb)) => Colour::Sprite0(rgb),
+            (_, Colour::Rgb(rgb)) => Colour::Rgb(rgb),
+        }
+    }
 }
 
 impl PaletteEntry {
