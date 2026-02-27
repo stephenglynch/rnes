@@ -2,7 +2,6 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use arrayvec::ArrayVec;
 use bitflags::bitflags;
 use crate::clock::{Clock, CycleDelay};
 use crate::renderer::FrameBuffer;
@@ -18,7 +17,13 @@ pub const HEIGHT: usize = 240;
 // Awaits 1 ppu cycle
 macro_rules! cycles {
     ($ppu:expr, $n:expr) => {
-        CycleDelay::new($ppu.clock.clone(), $n).await
+        CycleDelay::new($ppu.clock.clone(), $n, false).await
+    }
+}
+
+macro_rules! catchup {
+    ($ppu:expr, $n:expr) => {
+        CycleDelay::new($ppu.clock.clone(), $n, true).await
     }
 }
 
@@ -303,15 +308,16 @@ impl Ppu {
 
                 // (line == -1, 280 - 304) We reset the v addr constantly here
                 if line == -1 && self.is_rendering() {
-                    for _ in 0..24 {
+                    for _ in 0..25 {
                         self.reset_v_ver();
                         cycles!(self, 1);
                     }
                 } else {
-                    cycles!(self, 24);
+                    cycles!(self, 25);
                 }
 
-                cycles!(self, 17);
+                // (line, 305)
+                cycles!(self, 16);
 
                 // (line, 321) Chunks for next line
 
@@ -329,8 +335,8 @@ impl Ppu {
                     cycles!(self, 16);
                 }
 
-                // (l, 256) Nothing really happens for the rest of the line
-                cycles!(self, 84);
+                // (line, 337) Nothing really happens for the rest of the line
+                cycles!(self, 4);
             }
 
             // This marks end of rendering and start of V-blank
@@ -338,7 +344,7 @@ impl Ppu {
             cycles!(self, 340 + 1);
             // Post-render line (241, 1)
             self.ppu_status.set(self.ppu_status.get() | PpuStatus::VBLANK);
-            cycles!(self, 340 + 341 * 19);
+            catchup!(self, 340 + 341 * 19);
 
             self.write_to_frame_buffer(&frame);
 
@@ -352,11 +358,12 @@ impl Ppu {
     }
 
     fn mmu_resolve(&self, addr: u16) -> (Memory, usize) {
+        let addr = addr & 0x3fff;
         let (mem, loc) = match addr {
             0x0000..0x2000 => (Memory::ChrRom, addr),
             0x2000..0x3f00 => (Memory::Ram, addr & 0x0fff),
-            0x3f00..0x3fff => (Memory::PaletteRam, addr & 0x001f),
-                         _ => panic!("Unexpected vram access: 0x{:04x}", addr)
+            0x3f00..0x4000 => (Memory::PaletteRam, addr & 0x001f),
+                         _ => unreachable!("Shouln't be possible to access: 0x{:04x}", addr)
         };
         (mem, loc as usize)
     }
