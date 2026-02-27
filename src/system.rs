@@ -101,11 +101,11 @@ impl Cpu {
     fn mmu_resolve(&self, addr: u16) -> (Memory, usize) {
         let prog_rom_len = self.prg_rom.len();
         let (mem, loc) = match addr {
-            0x0000..0x2000 => (Memory::Ram, addr & 0xfff),
+            0x0000..0x2000 => (Memory::Ram, addr & 0x7ff),
             0x2000..0x4000 => (Memory::PpuRegs, addr & 0x0007),
             0x4014         => (Memory::Oam, 0),
             0x4000..0x401f => (Memory::ChipRegs, addr & 0x001f),
-            0x401f..0x6000 => panic!("Unused - what behaviour should occur here?"),
+            0x401f..0x6000 => unimplemented!("Unused - see todo?"), // TODO what behaviour should occur here?
             0x6000..0x8000 => (Memory::PrgRam, addr & 0xfff),
             0x8000..0xc000 => (Memory::PrgRom, addr & 0x3fff),
             // 0x8000..=0xffff => (Memory::PrgRom, addr & 0x7fff),
