@@ -60,7 +60,7 @@ impl Mapper for Mapper0 {
     fn ppu_get(&mut self, addr: usize) -> u8 {
         match addr {
             0x0000..0x2000 => self.chr_rom[addr],
-            0x2000..0x3f00 => self.ppu_ram[addr & 0x0fff],
+            0x2000..0x3f00 => self.ppu_ram[addr & 0x07ff],
             _ => 0
         }
     }
@@ -68,7 +68,7 @@ impl Mapper for Mapper0 {
     fn ppu_set(&mut self, addr: usize, val: u8) {
         match addr {
             0x0000..0x2000 => self.chr_rom[addr] = val,
-            0x2000..0x3f00 => self.ppu_ram[addr & 0x0fff] = val,
+            0x2000..0x3f00 => self.ppu_ram[addr & 0x07ff] = val,
             _ => ()
         }
     }
