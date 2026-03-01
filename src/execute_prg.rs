@@ -11,10 +11,11 @@ use crate::parse_ines::INes;
 use crate::clock::Clock;
 use crate::renderer::Renderer;
 use crate::gamepad_manager::GamepadManager;
+use crate::mapper::generate_mapper;
 
 const CYCLES_TO_RUN: usize = 100000000;
 
-pub fn execute_rom(ines: INes) {
+pub fn execute_rom(ines: INes) -> Result<(), Box<dyn std::error::Error>> {
     // Create renderer
     let renderer = Renderer::new();
     let frame_buffer = renderer.get_frame_buffer();
@@ -25,9 +26,10 @@ pub fn execute_rom(ines: INes) {
 
     thread::spawn(move || {
         // Build NES components
-        let clock = Rc::new(RefCell::new(Clock::new()));
-        let ppu = Rc::new(Ppu::new(clock.clone(), ines.chr_rom.unwrap(), frame_buffer));
-        let cpu = Cpu::new(clock.clone(), ines.prg_rom, ppu.clone(), gamepads);
+        let clock  = Rc::new(RefCell::new(Clock::new()));
+        let mapper  = generate_mapper(ines);
+        let ppu    = Rc::new(Ppu::new(clock.clone(), mapper.clone(), frame_buffer));
+        let cpu    = Cpu::new(clock.clone(), mapper, ppu.clone(), gamepads);
 
         // Create "async" pool to handle clock cycles
         let mut pool = LocalPool::new();
@@ -45,5 +47,5 @@ pub fn execute_rom(ines: INes) {
         println!("{} Instructions per us", (CYCLES_TO_RUN as f64) / now.elapsed().unwrap().as_secs_f64() / 1e6);
     });
 
-    renderer.run();
+    renderer.run().map_err(Into::into)
 }

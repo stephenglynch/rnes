@@ -5,6 +5,7 @@ use std::rc::Rc;
 use bitflags::bitflags;
 use crate::clock::{Clock, CycleDelay};
 use crate::renderer::FrameBuffer;
+use crate::mapper::Mapper;
 use palette::{Rgb, PaletteRam, Colour};
 use oam::Oam;
 
@@ -81,17 +82,10 @@ pub struct Ppu {
 
     // Other resources
     clock: Rc<RefCell<Clock>>,
-    chr_rom: Rc<RefCell<Vec<u8>>>,
-    ram: RefCell<Vec<u8>>,
+    mapper: Rc<RefCell<dyn Mapper>>,
     palette_ram: Rc<RefCell<PaletteRam>>,
     oam: RefCell<Oam>,
     frame_buffer: FrameBuffer
-}
-
-enum Memory {
-    ChrRom,
-    Ram,
-    PaletteRam,
 }
 
 impl RgbFrame {
@@ -193,8 +187,7 @@ impl VramAddr {
 }
 
 impl Ppu {
-    pub fn new(clock: Rc<RefCell<Clock>>, chr_rom: Vec<u8>, frame_buffer: FrameBuffer) -> Self {
-        let chr = Rc::new(RefCell::new(chr_rom));
+    pub fn new(clock: Rc<RefCell<Clock>>, mapper: Rc<RefCell<dyn Mapper>>, frame_buffer: FrameBuffer) -> Self {
         let palette_ram = Rc::new(RefCell::new(PaletteRam::new()));
         Self {
             //TODO: Confirm the intialisation values agianst power-on values
@@ -207,9 +200,8 @@ impl Ppu {
             v_reg: Cell::new(VramAddr(0)),
             x_fine_reg: Cell::new(0),
             write_toggle: Cell::new(false),
-            oam: RefCell::new(Oam::new(chr.clone(), palette_ram.clone())),
-            chr_rom: chr,
-            ram: RefCell::new(vec![0; 4096]),
+            oam: RefCell::new(Oam::new(mapper.clone(), palette_ram.clone())),
+            mapper: mapper,
             palette_ram: palette_ram,
             frame_buffer: frame_buffer
         }
@@ -357,33 +349,21 @@ impl Ppu {
         frame_buffer.copy_from_slice(&frame.to_rgb_frame());
     }
 
-    fn mmu_resolve(&self, addr: u16) -> (Memory, usize) {
-        let addr = addr & 0x3fff;
-        let (mem, loc) = match addr {
-            0x0000..0x2000 => (Memory::ChrRom, addr),
-            0x2000..0x3f00 => (Memory::Ram, addr & 0x0fff),
-            0x3f00..0x4000 => (Memory::PaletteRam, addr & 0x001f),
-                         _ => unreachable!("Shouln't be possible to access: 0x{:04x}", addr)
-        };
-        (mem, loc as usize)
-    }
-
     fn mmu_load(&self, addr: u16) -> u8 {
-        // println!("Loading from 0x{:04x}", addr);
-        let (mem, addr) = self.mmu_resolve(addr);
-        match mem {
-            Memory::ChrRom => self.chr_rom.borrow()[addr],
-            Memory::Ram => self.ram.borrow()[addr],
-            Memory::PaletteRam => self.palette_ram.borrow().get(addr)
+        let addr = addr & 0x3fff;
+        match addr {
+            0x0000..0x3f00 => self.mapper.borrow_mut().ppu_get(addr as usize),
+            0x3f00..0x4000 => self.palette_ram.borrow_mut().get((addr & 0x001f) as usize),
+            0x4000.. => 0
         }
     }
 
     fn mmu_store(&self, addr: u16, val: u8) {
-        let (mem, addr) = self.mmu_resolve(addr);
-        match mem {
-            Memory::ChrRom => (), // Do nothing if writing into ROM
-            Memory::Ram => self.ram.borrow_mut()[addr] = val,
-            Memory::PaletteRam => self.palette_ram.borrow_mut().set(addr, val),
+        let addr = addr & 0x3fff;
+        match addr {
+            0x0000..0x3f00 => self.mapper.borrow_mut().ppu_set(addr as usize, val),
+            0x3f00..0x4000 => self.palette_ram.borrow_mut().set((addr & 0x001f) as usize, val),
+            0x4000.. => ()
         }
     }
 

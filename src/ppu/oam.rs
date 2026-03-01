@@ -1,8 +1,8 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 use arrayvec::ArrayVec;
-use super::palette::{Rgb, Colour, PaletteRam};
-use super::Ppu;
+use crate::mapper::Mapper;
+use super::palette::{Colour, PaletteRam};
 
 use bitflags::bitflags;
 
@@ -28,7 +28,7 @@ struct Sprite {
 
 type SecondaryOam = ArrayVec<(Sprite, usize), 8>;
 pub struct Oam {
-    chr: Rc<RefCell<Vec<u8>>>,
+    mapper: Rc<RefCell<dyn Mapper>>,
     palette_ram: Rc<RefCell<PaletteRam>>,
     primary: [Sprite; 64],
     secondary: SecondaryOam,
@@ -51,9 +51,9 @@ impl Sprite {
 }
 
 impl Oam {
-    pub fn new(chr: Rc<RefCell<Vec<u8>>>, palette_ram: Rc<RefCell<PaletteRam>>) -> Self {
+    pub fn new(mapper: Rc<RefCell<dyn Mapper>>, palette_ram: Rc<RefCell<PaletteRam>>) -> Self {
         Self {
-            chr: chr,
+            mapper: mapper,
             palette_ram: palette_ram,
             primary: [Sprite::new(); 64],
             secondary: ArrayVec::new(),
@@ -105,6 +105,15 @@ impl Oam {
         false
     }
 
+    fn get_pattern(&self, start_addr: usize) -> [u8; 16] {
+        let mut mapper = self.mapper.borrow_mut();
+        let mut pattern = [0; 16];
+        for (i, addr) in  (start_addr..(start_addr + 16)).enumerate() {
+            pattern[i] = mapper.ppu_get(addr);
+        }
+        pattern
+    }
+
     /// Draws a 8-pixel chunk of RGB data. This is intended to be aligned
     /// with the output from the background drawing
     pub fn draw_chunk(&self, bank_sel: bool, y: usize, x_course: usize) -> [Colour; 8] {
@@ -119,10 +128,9 @@ impl Oam {
             if flip_y {
                 sprite_y = 7 - sprite_y;
             }
-            let chr = self.chr.borrow();
             let tile_index = sprite.tile_index as usize;
             let addr = (tile_index << 4) | ((bank_sel as usize) << 12);
-            let pattern = &chr[addr..(addr + 16)];
+            let pattern = self.get_pattern(addr);
             assert!(sprite_y >= 0 && sprite_y < 8);
             for (x, pixel) in pixels.iter_mut().enumerate() {
                 let palette_id = sprite.attributes & (OamAttributes::PALETTE_0 | OamAttributes::PALETTE_1);

@@ -6,6 +6,7 @@ use crate::instructions::{execute, interrupt};
 use crate::ppu::Ppu;
 use crate::clock::Clock;
 use crate::gamepad_manager::ActiveGamepads;
+use crate::mapper::Mapper;
 
 // Awaits a certain number of CPU clocks cycles (3x PPU cycles)
 // macro_rules! cycles {
@@ -49,8 +50,7 @@ impl Registers {
 
 enum Memory {
     Ram,
-    PrgRom,
-    PrgRam,
+    Cartridge,
     Oam,
     ChipRegs,
     PpuRegs,
@@ -61,23 +61,21 @@ pub struct Cpu {
     pub clock: Rc<RefCell<Clock>>,
     nmi_ff: bool,
     ram: Vec<u8>,
-    prg_rom: Vec<u8>,
-    prg_ram: Vec<u8>,
     chip: Chip,
-    ppu: Rc<Ppu>
+    ppu: Rc<Ppu>,
+    mapper: Rc<RefCell<dyn Mapper>>
 }
 
 impl Cpu {
-    pub fn new(clock: Rc<RefCell<Clock>>, prg_rom: Vec<u8>, ppu: Rc<Ppu>, active_gamepads: ActiveGamepads) -> Self {
+    pub fn new(clock: Rc<RefCell<Clock>>, mapper: Rc<RefCell<dyn Mapper>>, ppu: Rc<Ppu>, active_gamepads: ActiveGamepads) -> Self {
         let mut cpu = Cpu {
             clock: clock.clone(),
             registers: Registers::new(),
             ram: vec![0; 2048],
-            prg_rom: prg_rom,
-            prg_ram: vec![0; 2048],
             chip: Chip::new(active_gamepads),
             ppu: ppu,
-            nmi_ff: false
+            nmi_ff: false,
+            mapper: mapper
         };
         cpu.reset();
         cpu
@@ -99,17 +97,16 @@ impl Cpu {
     }
 
     fn mmu_resolve(&self, addr: u16) -> (Memory, usize) {
-        let prog_rom_len = self.prg_rom.len();
+        // let prog_rom_len = self.prg_rom.len();
         let (mem, loc) = match addr {
             0x0000..0x2000 => (Memory::Ram, addr & 0x7ff),
             0x2000..0x4000 => (Memory::PpuRegs, addr & 0x0007),
             0x4014         => (Memory::Oam, 0),
             0x4000..0x401f => (Memory::ChipRegs, addr & 0x001f),
-            0x401f..0x6000 => unimplemented!("Unused - see todo?"), // TODO what behaviour should occur here?
-            0x6000..0x8000 => (Memory::PrgRam, addr & 0xfff),
-            0x8000..0xc000 => (Memory::PrgRom, addr & 0x3fff),
+            0x401f..0x4020 => unimplemented!("Unused - see todo?"), // TODO what behaviour should occur here?
+            0x4020..       => (Memory::Cartridge, addr),
             // 0x8000..=0xffff => (Memory::PrgRom, addr & 0x7fff),
-            0xc000..=0xffff=> (Memory::PrgRom, prog_rom_len as u16 - 0x4000 + addr & 0x3fff)
+            // 0xc000..=0xffff=> (Memory::PrgRom, prog_rom_len as u16 - 0x4000 + addr & 0x3fff)
         };
         (mem, loc as usize)
     }
@@ -118,8 +115,7 @@ impl Cpu {
         let (mem, loc) = self.mmu_resolve(addr);
         match mem {
             Memory::Ram => self.ram[loc],
-            Memory::PrgRam => self.prg_ram[loc],
-            Memory::PrgRom => self.prg_rom[loc],
+            Memory::Cartridge => self.mapper.borrow_mut().get(loc),
             Memory::ChipRegs => self.chip.get_reg(loc),
             Memory::PpuRegs => self.ppu.get_reg(loc),
             Memory::Oam => 0,
@@ -130,8 +126,8 @@ impl Cpu {
         let (mem, loc) = self.mmu_resolve(addr);
         match mem {
             Memory::Ram => self.ram[loc] = val,
-            Memory::PrgRam => self.prg_ram[loc] = val,
-            Memory::PrgRom => self.prg_rom[loc] = val,
+
+            Memory::Cartridge => self.mapper.borrow_mut().set(loc, val),
             Memory::ChipRegs => self.chip.set_reg(loc, val),
             Memory::PpuRegs => self.ppu.set_reg(loc, val),
             Memory::Oam => self.oam_transfer(val)

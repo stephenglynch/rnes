@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
     if let Some(nes_path) = cli.nes.as_deref() {
         let ines = parse_ines::read_ines(nes_path).unwrap();
-        execute_prg::execute_rom(ines);
+        execute_prg::execute_rom(ines)?;
     }
     Ok(())
 }
