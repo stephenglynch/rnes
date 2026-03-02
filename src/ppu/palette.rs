@@ -21,6 +21,8 @@ pub struct Rgb(pub u8, pub u8, pub u8);
 
 #[derive(Clone, Copy, Debug)]
 pub enum Colour {
+    // TODO Need to make a distinction between background colour and sprite
+    // colour as sprite0 hits only apply to background
     Transparent,
     Rgb(Rgb),
     Sprite0(Rgb)
