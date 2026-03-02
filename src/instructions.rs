@@ -41,7 +41,7 @@ async fn nop(sys: &mut Cpu) {
 async fn load<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let mut addr_mode = A::default();
     let val = S::get(sys, &mut addr_mode);
-    D::set(sys, &mut addr_mode, val);
+    D::set(sys, &mut addr_mode, val).await;
     update_zero_status(sys, val);
     update_negative_status(sys, val);
     bump_pc::<A>(sys);
@@ -51,7 +51,7 @@ async fn load<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
 async fn store<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let mut addr_mode = A::default();
     let val = S::get(sys, &mut addr_mode);
-    D::set(sys, &mut addr_mode, val);
+    D::set(sys, &mut addr_mode, val).await;
     bump_pc::<A>(sys);
     cycles!(sys, addr_mode.cycles(AccessType::Write));
 }
@@ -59,7 +59,7 @@ async fn store<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
 async fn trans<D: Dest, S: Source>(sys: &mut Cpu) {
     let mut addr_mode = Immediate::default();
     let val = S::get(sys, &mut addr_mode);
-    D::set(sys, &mut addr_mode, val);
+    D::set(sys, &mut addr_mode, val).await;
     update_zero_status(sys, val);
     update_negative_status(sys, val);
     bump_pc::<Implied>(sys);
@@ -74,21 +74,21 @@ async fn txs(sys: &mut Cpu) {
 
 // Stack operations
 
-pub fn push_raw(sys: &mut Cpu, val: u8) {
+pub async fn push_raw(sys: &mut Cpu, val: u8) {
     let sp = sys.registers.sp as u16;
-    sys.mmu_store(0x0100 + sp, val);
+    sys.mmu_store(0x0100 + sp, val).await;
     sys.registers.sp -= 1;
 }
 
 async fn php(sys: &mut Cpu) {
     let p = sys.registers.sr | StatusRegister::BREAK | StatusRegister::IGNORED;
-    push_raw(sys, p.bits());
+    push_raw(sys, p.bits()).await;
     bump_pc::<Implied>(sys);
     cycles!(sys, 3);
 }
 
 async fn pha(sys: &mut Cpu) {
-    push_raw(sys, sys.registers.ac);
+    push_raw(sys, sys.registers.ac).await;
     bump_pc::<Implied>(sys);
     cycles!(sys, 3);
 }
@@ -125,7 +125,7 @@ async fn incr<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let result= S::get(sys, &mut addr_mode).wrapping_add(1);
     update_zero_status(sys, result);
     update_negative_status(sys, result);
-    D::set(sys, &mut addr_mode, result);
+    D::set(sys, &mut addr_mode, result).await;
     bump_pc::<A>(sys);
     cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
@@ -135,7 +135,7 @@ async fn decr<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let result = S::get(sys, &mut addr_mode).wrapping_sub(1);
     update_zero_status(sys, result);
     update_negative_status(sys, result);
-    D::set(sys, &mut addr_mode, result);
+    D::set(sys, &mut addr_mode, result).await;
     bump_pc::<A>(sys);
     cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
@@ -182,7 +182,7 @@ async fn and<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let result = val & sys.registers.ac;
     update_zero_status(sys, result);
     update_negative_status(sys, result);
-    D::set(sys, &mut addr_mode, result);
+    D::set(sys, &mut addr_mode, result).await;
     bump_pc::<A>(sys);
     cycles!(sys, addr_mode.cycles(AccessType::Read));
 }
@@ -193,7 +193,7 @@ async fn eor<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let result = val ^ sys.registers.ac;
     update_zero_status(sys, result);
     update_negative_status(sys, result);
-    D::set(sys, &mut addr_mode, result);
+    D::set(sys, &mut addr_mode, result).await;
     bump_pc::<A>(sys);
     cycles!(sys, addr_mode.cycles(AccessType::Read));
 }
@@ -204,7 +204,7 @@ async fn or<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     let result = val | sys.registers.ac;
     update_zero_status(sys, result);
     update_negative_status(sys, result);
-    D::set(sys, &mut addr_mode, result);
+    D::set(sys, &mut addr_mode, result).await;
     bump_pc::<A>(sys);
     cycles!(sys, addr_mode.cycles(AccessType::Read));
 }
@@ -219,7 +219,7 @@ async fn asl<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     update_zero_status(sys, result);
     update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, carry);
-    D::set(sys, &mut addr_mode, result as u8);
+    D::set(sys, &mut addr_mode, result as u8).await;
     bump_pc::<A>(sys);
     cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
@@ -232,7 +232,7 @@ async fn lsr<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     update_zero_status(sys, result);
     update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, carry);
-    D::set(sys, &mut addr_mode, result as u8);
+    D::set(sys, &mut addr_mode, result as u8).await;
     bump_pc::<A>(sys);
     cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
@@ -247,7 +247,7 @@ async fn rol<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     update_zero_status(sys, result);
     update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, new_carry);
-    D::set(sys, &mut addr_mode, result as u8);
+    D::set(sys, &mut addr_mode, result as u8).await;
     bump_pc::<A>(sys);
     cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
@@ -262,7 +262,7 @@ async fn ror<A: AddrMode + Default, D: Dest<A>, S: Source<A>>(sys: &mut Cpu) {
     update_zero_status(sys, result);
     update_negative_status(sys, result);
     sys.registers.sr.set(StatusRegister::CARRY, new_carry);
-    D::set(sys, &mut addr_mode, result as u8);
+    D::set(sys, &mut addr_mode, result as u8).await;
     bump_pc::<A>(sys);
     cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
 }
@@ -463,8 +463,8 @@ async fn jsr<A: AddrMode + Default>(sys: &mut Cpu) {
     let ret_addr = sys.registers.pc + 2;
     let ret_addr_hi = ((ret_addr & 0xff00) >> 8) as u8;
     let ret_addr_lo = ret_addr as u8;
-    push_raw(sys, ret_addr_hi);
-    push_raw(sys, ret_addr_lo);
+    push_raw(sys, ret_addr_hi).await;
+    push_raw(sys, ret_addr_lo).await;
     sys.registers.pc = dest;
     cycles!(sys, 6);
 }
@@ -485,11 +485,11 @@ pub async fn interrupt(sys: &mut Cpu, int_vec: u16) {
     let ret_addr_hi = ((ret_addr & 0xff00) >> 8) as u8;
     let ret_addr_lo = ret_addr as u8;
     // Save CPU state to stack
-    push_raw(sys, ret_addr_hi);
-    push_raw(sys, ret_addr_lo);
+    push_raw(sys, ret_addr_hi).await;
+    push_raw(sys, ret_addr_lo).await;
     let mut status = sys.registers.sr;
     status.set(StatusRegister::BREAK, false);
-    push_raw(sys, status.bits());
+    push_raw(sys, status.bits()).await;
     // Jump to interrupt vector
     let pc_lo = sys.mmu_load(int_vec) as u16;
     let pc_hi = sys.mmu_load(int_vec + 1) as u16;

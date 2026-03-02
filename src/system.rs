@@ -4,16 +4,16 @@ use bitflags::bitflags;
 use crate::chip::Chip;
 use crate::instructions::{execute, interrupt};
 use crate::ppu::Ppu;
-use crate::clock::Clock;
+use crate::clock::{Clock, CycleDelay};
 use crate::gamepad_manager::ActiveGamepads;
 use crate::mapper::Mapper;
 
 // Awaits a certain number of CPU clocks cycles (3x PPU cycles)
-// macro_rules! cycles {
-//     ($sys:expr, $n:expr) => {
-//         CycleDelay::new($sys.clock.clone(), $n * 3).await
-//     }
-// }
+macro_rules! cycles {
+    ($sys:expr, $n:expr) => {
+        CycleDelay::new($sys.clock.clone(), $n * 3, false).await
+    }
+}
 
 bitflags! {
     /// Represents a set of flags.
@@ -122,7 +122,7 @@ impl Cpu {
         }
     }
 
-    pub fn mmu_store(&mut self, addr: u16, val: u8) {
+    pub async fn mmu_store(&mut self, addr: u16, val: u8) {
         let (mem, loc) = self.mmu_resolve(addr);
         match mem {
             Memory::Ram => self.ram[loc] = val,
@@ -130,20 +130,20 @@ impl Cpu {
             Memory::Cartridge => self.mapper.borrow_mut().set(loc, val),
             Memory::ChipRegs => self.chip.set_reg(loc, val),
             Memory::PpuRegs => self.ppu.set_reg(loc, val),
-            Memory::Oam => self.oam_transfer(val)
+            Memory::Oam => self.oam_transfer(val).await
         }
     }
 
-    fn oam_transfer(&mut self, hi_addr: u8) {
+    async fn oam_transfer(&mut self, hi_addr: u8) {
         // TODO: this consumes some number of cycles
         let hi_addr = hi_addr as u16;
         for lo_addr in 0..256 {
             let addr = (hi_addr << 8) | lo_addr;
             let val = self.mmu_load(addr);
             self.ppu.write_oam(val);
-            // cycles!(self, 2);
+            cycles!(self, 2);
         }
-        // cycles!(self, 2);
+        cycles!(self, 2);
     }
 
     pub async fn run(mut self) {
