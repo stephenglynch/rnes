@@ -211,7 +211,6 @@ impl Ppu {
         let fine_x = self.x_fine_reg.get() as usize;
         let mut output_chunk = [Colour::new(); 8];
         output_chunk.copy_from_slice(&full_chunk[fine_x..(fine_x + 8)]);
-        output_chunk.reverse();
         output_chunk
     }
 
@@ -410,6 +409,7 @@ impl Ppu {
             colour[bit] = bit_colour;
         }
 
+        colour.reverse();
         colour
     }
 
