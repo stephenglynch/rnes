@@ -15,7 +15,7 @@ impl Chip {
     }
 
     fn read_game_pad(&mut self, index: usize) -> u8 {
-        self.gamepad_fifos[index].pop().unwrap_or(1)
+        self.gamepad_fifos[index].pop().unwrap_or(0)
     }
 
     pub fn get_reg(&mut self, addr: usize) -> u8 {
