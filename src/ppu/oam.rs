@@ -32,6 +32,7 @@ pub struct Oam {
     palette_ram: Rc<RefCell<PaletteRam>>,
     primary: [Sprite; 64],
     secondary: SecondaryOam,
+    current_y: usize
 }
 
 impl Sprite {
@@ -57,6 +58,7 @@ impl Oam {
             palette_ram: palette_ram,
             primary: [Sprite::new(); 64],
             secondary: ArrayVec::new(),
+            current_y: Default::default()
         }
     }
 
@@ -94,7 +96,8 @@ impl Oam {
 
     /// Adds sprites to secondary OAM and indicates overflow if detected
     /// TODO: Does not perform NES' original "incorrect" overflow check
-    pub fn populate_secondary_oam(&mut self, y: usize) -> bool {
+    pub fn prepare_oam(&mut self, y: usize) -> bool {
+        self.current_y = y & 0xff;
         for (i, sprite) in self.primary.iter().enumerate() {
             if sprite.on_scanline(y as u8) {
                 if self.secondary.try_push((*sprite, i)).is_err() {
@@ -116,9 +119,9 @@ impl Oam {
 
     /// Draws a 8-pixel chunk of RGB data. This is intended to be aligned
     /// with the output from the background drawing
-    pub fn draw_chunk(&self, bank_sel: bool, y: usize, x_course: usize) -> [Colour; 8] {
+    pub fn draw_chunk(&self, bank_sel: bool, x_course: usize) -> [Colour; 8] {
         // Constrain values to help with compiler optimisations
-        let y = (y & 0xff) as i32;
+        let y = (self.current_y & 0xff) as i32;
         let x_course = (x_course & 0x1f) as i32;
         let mut pixels = [Colour::new(); 8];
         for (sprite, sprite_num) in self.secondary.iter() {

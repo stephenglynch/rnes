@@ -242,6 +242,8 @@ impl Ppu {
         // Not correctly updating v
         let mut chunk;
         let mut full_chunk = [Colour::new(); 16];
+        let mut current_sprite_line = [[Colour::new(); 8]; 32];
+        let mut next_sprite_line = [[Colour::new(); 8]; 32];
         let mut frame = RgbFrame::new();
         let mut odd_frame = true;
         loop {
@@ -262,15 +264,15 @@ impl Ppu {
                 // (line, 1)
                 self.oam.borrow_mut().clear_secondary_oam();
                 if line != -1 {
-                    self.oam.borrow_mut().populate_secondary_oam(line as usize);
+                    self.oam.borrow_mut().prepare_oam(line as usize);
                 }
                 for tile in 0..32 {
                     if self.is_rendering() {
                         // Render chunk unless it's the pre-render line
                         if line != -1 && tile != 31 {
                             let drawn_bg = self.apply_fine_x_scroll(&full_chunk);
-                            let drawn_sprite = self.draw_oam(line as usize, tile as usize);
-                            let drawn_chunk = self.combine_drawn_layers(drawn_bg, drawn_sprite);
+                            next_sprite_line[tile] = self.draw_oam(tile as usize);
+                            let drawn_chunk = self.combine_drawn_layers(drawn_bg, current_sprite_line[tile]);
                             frame.write_chunk(line as usize, tile as usize, drawn_chunk);
                         }
                         // Get next chunk
@@ -289,6 +291,7 @@ impl Ppu {
                     } else {
                         cycles!(self, 8);
                     }
+                    current_sprite_line = next_sprite_line;
                 }
 
                 // (line, 257)
@@ -548,8 +551,8 @@ impl Ppu {
         self.oam_addr.set(oam_addr.wrapping_add(1));
     }
 
-    fn draw_oam(&self, y: usize, x_course: usize) -> [Colour; 8] {
+    fn draw_oam(&self, x_course: usize) -> [Colour; 8] {
         let tile_sel = self.ppu_ctrl.get().contains(PpuCtrl::SPRITE_TILE_SEL);
-        self.oam.borrow().draw_chunk(tile_sel, y, x_course)
+        self.oam.borrow().draw_chunk(tile_sel, x_course)
     }
 }
