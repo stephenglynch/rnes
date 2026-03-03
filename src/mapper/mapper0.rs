@@ -11,7 +11,7 @@ pub struct Mapper0 {
 impl Mapper0 {
     pub fn new(ines: INes) -> Self {
         let prg_rom = ines.prg_rom;
-        let chr_rom = ines.chr_rom.unwrap();
+        let chr_rom = ines.chr_rom.unwrap_or(vec![0; 8*1024]);
         // Mapper 0 must be 16k or 32k
         if prg_rom.len() != 16*1024 && prg_rom.len() != 32*1024 {
             panic!("Incompatible PRG ROM size for mapper 0 ({})", prg_rom.len());
