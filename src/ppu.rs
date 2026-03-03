@@ -74,11 +74,12 @@ pub struct Ppu {
     ppu_status: Cell<PpuStatus>,
     oam_addr: Cell<u8>,
 
-    // Loopy regs
+    // Internal registers
     write_toggle: Cell<bool>,
     t_reg: Cell<VramAddr>,
     v_reg: Cell<VramAddr>,
     x_fine_reg: Cell<u8>,
+    ppudata_read_buffer: Cell<u8>,
 
     // Other resources
     clock: Rc<RefCell<Clock>>,
@@ -171,6 +172,7 @@ impl Ppu {
             v_reg: Cell::new(VramAddr(0)),
             x_fine_reg: Cell::new(0),
             write_toggle: Cell::new(false),
+            ppudata_read_buffer: Cell::new(0),
             oam: RefCell::new(Oam::new(mapper.clone(), palette_ram.clone())),
             mapper: mapper,
             palette_ram: palette_ram,
@@ -499,8 +501,10 @@ impl Ppu {
             // PPUDATA
             7 => {
                 let val = self.mmu_load(self.v_reg.get().0);
+                let read_buffer_val = self.ppudata_read_buffer.get();
+                self.ppudata_read_buffer.set(val);
                 self.v_addr_increment();
-                val
+                read_buffer_val
             },
             _ => unreachable!()
         }
