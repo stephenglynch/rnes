@@ -107,69 +107,40 @@ impl RgbFrame {
 }
 
 impl VramAddr {
-
-    fn set_x_course(self, val: u16) -> Self {
+    fn set_x(self, x_val: u16) -> Self {
         let mut v = self.0;
-        v &= !0b00000000_00011111; // Clear x-scroll bits and nametable bits
-        v |= (val & 0b11111000) >> 3; // Set course scroll bits (3-7)
+        v &= !0b00000100_00011111; // Clear x bits
+        v |= (x_val & 0b11111000) >> 3; // Set x course bits
+        v |= (x_val & 0b00000001_00000000) << 2; // Set scroll bit 8
         VramAddr(v)
     }
 
-    fn set_x(self, val: u16) -> Self {
-        let mut v = self.set_x_course(val).0;
-        v |= (val & 0b00000001_00000000) << 2; // Set scroll bit 8
-        VramAddr(v)
-    }
-
-    fn set_y_course(self, val: u16) -> Self {
-        let val = val;
+    fn set_y(self, y_val: u16) -> Self {
         let mut v = self.0;
-        v &= !0b00000011_11100000; // Clear course y-scroll bits
-        v |= (val & 0b11111000) << 2;
+        v &= !0b01111011_11100000; // Clear y bits
+        v |= (y_val & 0b11111000) << 2; // Set y course bits
+        v |= (y_val & 0b00000111) << 12; //  Set y fine bits
+        v |= (y_val & 0b00000001_00000000) << 3; // Set scroll bit 8
         VramAddr(v)
     }
 
-    fn set_y_fine(self, val: u16) -> Self {
-        let val = val;
-        let mut v = self.0;
-        v &= !0b01110000_00000000; // Clear fine y-scroll bits
-        v |= (val & 0b00000111) << 12;
-        VramAddr(v)
+    fn x_course_increment(self) -> Self {
+        let v = self.0;
+        let mut x_course = (v & 0b11111) | ((v & 0b100_00000000) >> 5);
+        x_course += 1;
+        let x = x_course << 3;
+        self.set_x(x)
     }
 
-    fn set_y(self, val: u16) -> Self {
-        let v = self.set_y_course(val);
-        let mut v = v.set_y_fine(val).0;
-        v |= (val & 0b00000001_00000000) << 3; // Set scroll bit 8
-        VramAddr(v)
+    fn y_increment(self) -> Self {
+        let v = self.0;
+        // Get actual y value
+        let mut y = ((v & 0b1110000_00000000) >> 12) | ((v & 0b11_11100000) >> 2) | ((v & 0b1000_00000000) >> 3);
+        y += 1;
+        self.set_y(y)
     }
 
-    fn to_x_course(&self) -> u16 {
-        let mut v = 0;
-        v |= (0b00000000_00011111 & self.0) << 3;
-        v |= (0b00000100_00000000 & self.0) >> 2;
-        v
-    }
-
-    fn to_y(&self) -> u16 {
-        let mut y = 0;
-        y |= (self.0 & 0b01110000_00000000) >> 12;
-        y |= (self.0 & 0b00000011_11100000) >> 2;
-        y |= (self.0 & 0b00001000_00000000) >> 3;
-        y
-    }
-
-    fn add_x_course(self, val: u16) -> Self {
-        let val = self.to_x_course() + val;
-        self.set_x(val)
-    }
-
-    fn add_y(self, val: u16) -> Self {
-        let val = self.to_y() + val;
-        self.set_y(val)
-    }
-
-    fn set_x_scroll_with_addr(&self, other: Self) -> Self {
+    fn set_x_raw(&self, other: Self) -> Self {
         let mask = 0b00001100_00011111;
         let mut new_v = self.0 & !mask;
         let other = other.0;
@@ -177,7 +148,7 @@ impl VramAddr {
         VramAddr(new_v)
     }
 
-    fn set_y_scroll_with_addr(&self, other: Self) -> Self {
+    fn set_y_raw(&self, other: Self) -> Self {
         let mask = 0b01110011_11100000;
         let mut new_v = self.0 & !mask;
         let other = other.0;
@@ -215,23 +186,23 @@ impl Ppu {
     }
 
     fn v_hor_inc(&self) {
-        self.v_reg.set(self.v_reg.get().add_x_course(8));
+        self.v_reg.set(self.v_reg.get().x_course_increment());
     }
 
     fn v_ver_inc(&self) {
-        self.v_reg.set(self.v_reg.get().add_y(1));
+        self.v_reg.set(self.v_reg.get().y_increment());
     }
 
     fn reset_v_hor(&self) {
         let v = self.v_reg.get();
         let t = self.t_reg.get();
-        self.v_reg.set(v.set_x_scroll_with_addr(t));
+        self.v_reg.set(v.set_x_raw(t));
     }
 
     fn reset_v_ver(&self) {
         let v = self.v_reg.get();
         let t = self.t_reg.get();
-        self.v_reg.set(v.set_y_scroll_with_addr(t));
+        self.v_reg.set(v.set_y_raw(t));
     }
 
     fn is_rendering(&self) -> bool {
@@ -476,7 +447,7 @@ impl Ppu {
             5 => {
                 let t = self.t_reg.get();
                 self.t_reg.set(if !write_toggle {
-                    let t = t.set_x_course(val as u16);
+                    let t = t.set_x(val as u16);
                     let x_fine = 0b0111 & val;
                     self.x_fine_reg.set(x_fine);
                     t
@@ -554,5 +525,25 @@ impl Ppu {
     fn draw_oam(&self, x_course: usize) -> [Colour; 8] {
         let tile_sel = self.ppu_ctrl.get().contains(PpuCtrl::SPRITE_TILE_SEL);
         self.oam.borrow().draw_chunk(tile_sel, x_course)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use super::*;
+
+    #[test]
+    fn test_vram_x_incr_1() {
+        let vram = VramAddr(0x1062);
+        let vram = vram.x_course_increment();
+        assert_eq!(vram.0, 0x1063);
+    }
+
+    #[test]
+    fn test_vram_x_incr_2() {
+        let vram = VramAddr(0x05ff);
+        let vram = vram.x_course_increment();
+        assert_eq!(vram.0, 0x01e0);
     }
 }
