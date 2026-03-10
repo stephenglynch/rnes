@@ -1,21 +1,137 @@
-// TOOD: Implement APU
+use std::cell::RefCell;
+use std::rc::Rc;
+use crate::audio::{Audio, AudioInterface, Sound};
 use crate::gamepad_manager::ActiveGamepads;
+use crate::clock::{Clock, CycleDelay};
+
+// Awaits a certain number of APU clock cycles (2x CPU cycles)
+macro_rules! cycles {
+    ($chip:expr, $n:expr) => {
+        let clock = $chip.borrow_mut().clock.clone();
+        CycleDelay::new(clock, $n * 6, false).await
+    }
+}
+
+pub struct Pulse {
+    id: usize,
+    interface: AudioInterface,
+    enabled: bool,
+    duty: u8,
+    counter_halt: bool,
+    constant_vol: bool,
+    vol: u8,
+    timer: u16,
+    length: u8
+}
+
+pub struct Noise {
+    interface: AudioInterface,
+    enabled: bool,
+    mode: bool,
+    period: u8,
+    length: u8
+}
 
 pub struct Chip {
+    clock: Rc<RefCell<Clock>>,
+    audio: Audio,
     active_gamepads: ActiveGamepads,
     gamepad_fifos: [Vec<u8>; 2],
+    pulse1: Pulse,
+    pulse2: Pulse,
+    seq_mode: bool,
+    int_flag: bool,
+    int_set: bool
+}
+
+const CPU_HZ: f32 = 1.789773e6;
+const LENGTH_TABLE: [u8; 32] = [
+    10, 254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
+    12,  16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
+];
+const DUTY_TABLE: [f32; 4] = [0.125, 0.250, 0.500, 0.750];
+
+
+impl Pulse {
+    fn new(id: usize, interface: AudioInterface) -> Self {
+        Self {
+            id: id,
+            interface: interface,
+            enabled: false,
+            duty: 0,
+            counter_halt: false,
+            constant_vol: false,
+            vol: 0,
+            timer: 0,
+            length: 0
+        }
+    }
+
+    fn tick(&mut self) {
+        if !self.counter_halt {
+            self.length = self.length.saturating_sub(1);
+        }
+        if self.length > 0 && self.timer >= 8 {
+            let period = (((self.timer + 1) * 16) as f32) / CPU_HZ;
+            // println!("Generating tone of {} Hz", 1.0/period);
+            let duty = DUTY_TABLE[(self.duty & 0x03) as usize];
+            let volume = (self.vol as f32) / 15.0;
+            let _ = self.interface.tx.send(Sound::SquareWave { period: period, duty: duty, volume: volume});
+        } else {
+            println!("Silencing pulse{}", self.id);
+            let _ = self.interface.tx.send(Sound::None);
+        }
+    }
+
+    fn set_reg(&mut self, loc: usize, val: u8) {
+        match loc {
+            0 => {
+                self.duty = (val & 0xc0) >> 6;
+                self.counter_halt = (val & 0x20) != 0;
+                self.constant_vol = (val & 0x10) != 0;
+                self.vol = val & 0x0f;
+            },
+            1 => {
+                // Do nothing
+            },
+            2 => {
+                self.timer &= 0x00ff;
+                self.timer |= val as u16;
+            },
+            3 => {
+                self.timer &= 0x0f00;
+                self.timer |= (val as u16 & 0x07) << 8;
+                self.length = LENGTH_TABLE[(val >> 3) as usize];
+                println!("Pulse{} duration set to {}", self.id, self.length as f32 / 120.0)
+            }
+            _ => unreachable!("Should not get here")
+        }
+    }
 }
 
 impl Chip {
-    pub fn new(active_gamepads: ActiveGamepads) -> Self {
-        Chip {
+    pub fn new(clock: Rc<RefCell<Clock>>, audio: Audio, active_gamepads: ActiveGamepads) -> Self {
+        let pulse1 = Pulse::new(1, audio.create_interface().unwrap());
+        let pulse2 = Pulse::new(2, audio.create_interface().unwrap());
+        Self {
+            clock: clock,
+            audio: audio,
             active_gamepads: active_gamepads,
             gamepad_fifos: Default::default(),
+            pulse1: pulse1,
+            pulse2: pulse2,
+            seq_mode: false,
+            int_flag: false,
+            int_set: false
         }
     }
 
     fn read_game_pad(&mut self, index: usize) -> u8 {
         self.gamepad_fifos[index].pop().unwrap_or(0)
+    }
+
+    pub fn int_request(&self) -> bool {
+        self.int_flag
     }
 
     pub fn get_reg(&mut self, addr: usize) -> u8 {
@@ -26,10 +142,31 @@ impl Chip {
         }
     }
 
-    pub fn set_reg(&mut self, addr: usize, data: u8) {
+    pub fn set_reg(&mut self, addr: usize, val: u8) {
         match addr {
+            0x00..0x04 => {
+                self.pulse1.set_reg(addr & 0x3, val);
+            },
+            0x04..0x08 => {
+                self.pulse2.set_reg(addr & 0x3, val);
+            },
+            0x15 => {
+                if val & 0x01 != 0 {
+                    self.pulse1.enabled = true;
+                } else {
+                    self.pulse1.enabled = false;
+                    self.pulse1.length = 0;
+                }
+
+                if val & 0x02 != 0 {
+                    self.pulse2.enabled = true;
+                } else {
+                    self.pulse2.enabled = false;
+                    self.pulse2.length = 0;
+                }
+            },
             0x16 => {
-                if data & 0x01 != 0  {
+                if val & 0x01 != 0 {
                     let sampled = self.active_gamepads.lock().unwrap();
                     for i in 0..self.gamepad_fifos.len() {
                         if let Some((_, state)) = sampled.get(i) {
@@ -40,7 +177,43 @@ impl Chip {
                     }
                 }
             }, // Start strobe
+            0x17 => {
+                self.seq_mode = 0x80 & val != 0;
+                self.int_flag = 0x40 & val != 0;
+                // Clear interrupt if interrupt inhibit is set
+                if self.int_flag {
+                    self.int_set = false;
+                }
+            }
             _ => () // Do nothing
         }
+    }
+}
+
+pub async fn run_chip(chip: Rc<RefCell<Chip>>) {
+    loop {
+        // Step 1
+        cycles!(chip, 3728);
+
+        // Step 2
+        cycles!(chip, 3728);
+        chip.borrow_mut().pulse1.tick();
+        chip.borrow_mut().pulse2.tick();
+
+        // Step 3
+        cycles!(chip, 3729);
+
+        // Step 4
+        cycles!(chip, 3729);
+        if !chip.borrow().seq_mode {
+            chip.borrow_mut().int_set = true;
+        }
+
+        // Step 4/5
+        if chip.borrow().seq_mode {
+            cycles!(chip, 3726);
+        }
+        chip.borrow_mut().pulse1.tick();
+        chip.borrow_mut().pulse2.tick();
     }
 }

@@ -13,6 +13,7 @@ mod chip;
 mod ppu;
 mod renderer;
 mod gamepad_manager;
+mod audio;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

@@ -60,21 +60,23 @@ pub struct Cpu {
     pub registers: Registers,
     pub clock: Rc<RefCell<Clock>>,
     nmi_ff: bool,
+    int_ff: bool,
     ram: Vec<u8>,
-    chip: Chip,
+    chip: Rc<RefCell<Chip>>,
     ppu: Rc<Ppu>,
     mapper: Rc<RefCell<dyn Mapper>>
 }
 
 impl Cpu {
-    pub fn new(clock: Rc<RefCell<Clock>>, mapper: Rc<RefCell<dyn Mapper>>, ppu: Rc<Ppu>, active_gamepads: ActiveGamepads) -> Self {
+    pub fn new(clock: Rc<RefCell<Clock>>, mapper: Rc<RefCell<dyn Mapper>>, chip: Rc<RefCell<Chip>>, ppu: Rc<Ppu>) -> Self {
         let mut cpu = Cpu {
             clock: clock.clone(),
             registers: Registers::new(),
             ram: vec![0; 2048],
-            chip: Chip::new(active_gamepads),
+            chip: chip,
             ppu: ppu,
             nmi_ff: false,
+            int_ff: false,
             mapper: mapper
         };
         cpu.reset();
@@ -94,6 +96,12 @@ impl Cpu {
         // Unset NMI flip-flop
         self.nmi_ff = false;
         interrupt(self, 0xfffa).await;
+    }
+
+    async fn jump_to_int_vector(&mut self) {
+        // Unset INT flip-flop
+        self.int_ff = false;
+        interrupt(self, 0xfffe).await;
     }
 
     fn mmu_resolve(&self, addr: u16) -> (Memory, usize) {
@@ -116,7 +124,7 @@ impl Cpu {
         match mem {
             Memory::Ram => self.ram[loc],
             Memory::Cartridge => self.mapper.borrow_mut().get(loc),
-            Memory::ChipRegs => self.chip.get_reg(loc),
+            Memory::ChipRegs => self.chip.borrow_mut().get_reg(loc),
             Memory::PpuRegs => self.ppu.get_reg(loc),
             Memory::Oam => 0,
         }
@@ -128,7 +136,7 @@ impl Cpu {
             Memory::Ram => self.ram[loc] = val,
 
             Memory::Cartridge => self.mapper.borrow_mut().set(loc, val),
-            Memory::ChipRegs => self.chip.set_reg(loc, val),
+            Memory::ChipRegs => self.chip.borrow_mut().set_reg(loc, val),
             Memory::PpuRegs => self.ppu.set_reg(loc, val),
             Memory::Oam => self.oam_transfer(val).await
         }
@@ -148,6 +156,7 @@ impl Cpu {
 
     pub async fn run(mut self) {
         let mut nmi_level = false;
+        let mut int_level = false;
         loop {
             // Detect NMI 'edge' change
             if self.ppu.nmi_request() && !nmi_level {
@@ -157,10 +166,24 @@ impl Cpu {
                 nmi_level = false;
             }
 
+            // Detect INT 'edge' change
+            if self.chip.borrow().int_request() && !int_level {
+                int_level = true;
+                self.int_ff = true;
+            } else if !self.chip.borrow().int_request() && int_level {
+                int_level = false;
+            }
+
             // Check NMI request
             if self.nmi_ff {
                 // println!("NMI interrupt!");
                 self.jump_to_nmi_vector().await;
+            }
+
+            // Check INT request
+            if self.nmi_ff {
+                println!("INT interrupt!");
+                self.jump_to_int_vector().await;
             }
 
             // Run next instruction
