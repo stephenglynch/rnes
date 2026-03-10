@@ -12,19 +12,27 @@ macro_rules! cycles {
     }
 }
 
-pub struct Pulse {
+struct Envelope {
+    volume: u8,
+    divider: u8,
+    decay: u8,
+    start: bool,
+    constant_vol: bool,
+    loop_flag: bool,
+}
+
+struct Pulse {
     id: usize,
     interface: AudioInterface,
     enabled: bool,
     duty: u8,
     counter_halt: bool,
-    constant_vol: bool,
-    vol: u8,
+    envelope: Envelope,
     timer: u16,
     length: u8
 }
 
-pub struct Noise {
+struct Noise {
     interface: AudioInterface,
     enabled: bool,
     mode: bool,
@@ -51,6 +59,59 @@ const LENGTH_TABLE: [u8; 32] = [
 ];
 const DUTY_TABLE: [f32; 4] = [0.125, 0.250, 0.500, 0.750];
 
+impl Envelope {
+    fn new() -> Self {
+        Self {
+            volume: 0,
+            divider: 0,
+            decay: 0,
+            start: false,
+            constant_vol: false,
+            loop_flag: false,
+        }
+    }
+
+    fn set_constant_vol(&mut self, val: bool) {
+        self.constant_vol = val;
+    }
+
+    fn set_start(&mut self) {
+        self.start = true;
+    }
+
+    fn set_volume(&mut self, volume: u8) {
+        self.volume = volume & 0x0f;
+    }
+
+    fn tick(&mut self) {
+        if self.start {
+            self.start = false;
+            self.decay = 15;
+            self.divider = self.volume;
+        } else if self.divider == 0{
+            self.divider = self.volume;
+            self.tick_decay();
+        } else {
+            self.divider -= 1;
+        }
+    }
+
+    fn tick_decay(&mut self) {
+        if self.decay > 0 {
+            self.decay -= 1;
+        } else if self.decay == 0 && self.loop_flag {
+            self.decay = 15;
+        }
+    }
+
+    fn output_volume(&self) -> f32 {
+        (if self.constant_vol {
+            self.volume as f32
+        } else {
+            self.decay as f32
+        }) / 15.0
+    }
+}
 
 impl Pulse {
     fn new(id: usize, interface: AudioInterface) -> Self {
@@ -60,8 +121,7 @@ impl Pulse {
             enabled: false,
             duty: 0,
             counter_halt: false,
-            constant_vol: false,
-            vol: 0,
+            envelope: Envelope::new(),
             timer: 0,
             length: 0
         }
@@ -75,10 +135,9 @@ impl Pulse {
             let period = (((self.timer + 1) * 16) as f32) / CPU_HZ;
             // println!("Generating tone of {} Hz", 1.0/period);
             let duty = DUTY_TABLE[(self.duty & 0x03) as usize];
-            let volume = (self.vol as f32) / 15.0;
+            let volume = self.envelope.output_volume();
             let _ = self.interface.tx.send(Sound::SquareWave { period: period, duty: duty, volume: volume});
         } else {
-            println!("Silencing pulse{}", self.id);
             let _ = self.interface.tx.send(Sound::None);
         }
     }
@@ -88,8 +147,8 @@ impl Pulse {
             0 => {
                 self.duty = (val & 0xc0) >> 6;
                 self.counter_halt = (val & 0x20) != 0;
-                self.constant_vol = (val & 0x10) != 0;
-                self.vol = val & 0x0f;
+                self.envelope.set_constant_vol((val & 0x10) != 0);
+                self.envelope.set_volume(val & 0x0f);
             },
             1 => {
                 // Do nothing
@@ -102,7 +161,7 @@ impl Pulse {
                 self.timer &= 0x0f00;
                 self.timer |= (val as u16 & 0x07) << 8;
                 self.length = LENGTH_TABLE[(val >> 3) as usize];
-                println!("Pulse{} duration set to {}", self.id, self.length as f32 / 120.0)
+                self.envelope.set_start();
             }
             _ => unreachable!("Should not get here")
         }
@@ -194,13 +253,19 @@ pub async fn run_chip(chip: Rc<RefCell<Chip>>) {
     loop {
         // Step 1
         cycles!(chip, 3728);
+        chip.borrow_mut().pulse1.envelope.tick();
+        chip.borrow_mut().pulse2.envelope.tick();
 
         // Step 2
         cycles!(chip, 3728);
+        chip.borrow_mut().pulse1.envelope.tick();
+        chip.borrow_mut().pulse2.envelope.tick();
         chip.borrow_mut().pulse1.tick();
         chip.borrow_mut().pulse2.tick();
 
         // Step 3
+        chip.borrow_mut().pulse1.envelope.tick();
+        chip.borrow_mut().pulse2.envelope.tick();
         cycles!(chip, 3729);
 
         // Step 4
@@ -213,6 +278,8 @@ pub async fn run_chip(chip: Rc<RefCell<Chip>>) {
         if chip.borrow().seq_mode {
             cycles!(chip, 3726);
         }
+        chip.borrow_mut().pulse1.envelope.tick();
+        chip.borrow_mut().pulse2.envelope.tick();
         chip.borrow_mut().pulse1.tick();
         chip.borrow_mut().pulse2.tick();
     }
