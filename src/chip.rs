@@ -42,7 +42,6 @@ struct Noise {
 
 pub struct Chip {
     clock: Rc<RefCell<Clock>>,
-    audio: Audio,
     active_gamepads: ActiveGamepads,
     gamepad_fifos: [Vec<u8>; 2],
     pulse1: Pulse,
@@ -174,7 +173,6 @@ impl Chip {
         let pulse2 = Pulse::new(2, audio.create_interface().unwrap());
         Self {
             clock: clock,
-            audio: audio,
             active_gamepads: active_gamepads,
             gamepad_fifos: Default::default(),
             pulse1: pulse1,
