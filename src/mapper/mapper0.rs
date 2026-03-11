@@ -5,7 +5,8 @@ pub struct Mapper0 {
     ppu_ram: Vec<u8>,
     chr_rom: Vec<u8>,
     prg_rom: Vec<u8>,
-    prg_ram: Vec<u8>
+    prg_ram: Vec<u8>,
+    vertical_mirroring: bool
 }
 
 impl Mapper0 {
@@ -23,7 +24,8 @@ impl Mapper0 {
             ppu_ram: vec![0; 2048],
             prg_rom: prg_rom,
             prg_ram: vec![0; 2048],
-            chr_rom: chr_rom
+            chr_rom: chr_rom,
+            vertical_mirroring: ines.vertical_mirroring
         }
     }
 
@@ -32,6 +34,14 @@ impl Mapper0 {
             0x7fff
         } else {
             0x3fff
+        }
+    }
+
+    fn resolve_ram_addr(&self, addr: usize) -> usize {
+        if self.vertical_mirroring {
+            addr & 0x07ff
+        } else {
+            (addr & 0x03ff) | ((addr & 0x800) >> 1)
         }
     }
 }
@@ -60,7 +70,7 @@ impl Mapper for Mapper0 {
     fn ppu_get(&mut self, addr: usize) -> u8 {
         match addr {
             0x0000..0x2000 => self.chr_rom[addr],
-            0x2000..0x3f00 => self.ppu_ram[addr & 0x07ff],
+            0x2000..0x3f00 => self.ppu_ram[self.resolve_ram_addr(addr)],
             _ => 0
         }
     }
@@ -68,7 +78,10 @@ impl Mapper for Mapper0 {
     fn ppu_set(&mut self, addr: usize, val: u8) {
         match addr {
             0x0000..0x2000 => self.chr_rom[addr] = val,
-            0x2000..0x3f00 => self.ppu_ram[addr & 0x07ff] = val,
+            0x2000..0x3f00 => {
+                let addr = self.resolve_ram_addr(addr);
+                self.ppu_ram[addr] = val;
+            }
             _ => ()
         }
     }
