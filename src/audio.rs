@@ -22,6 +22,9 @@ pub enum Sound {
         period: f32,
         duty: f32,
         volume: f32
+    },
+    TriangleWave {
+        period: f32,
     }
 }
 
@@ -30,6 +33,9 @@ fn gen_sound(sound: &Sound, sample: f32, sample_rate: f32) -> (f32, f32) {
         Sound::None => (0.0, 0.0),
         Sound::SquareWave { period, duty , volume} => {
             square_wave(period, duty, volume, sample, sample_rate)
+        }
+        Sound::TriangleWave { period} => {
+            tirangle_wave(period, sample, sample_rate)
         }
     }
 }
@@ -42,6 +48,17 @@ fn square_wave(period: f32, duty: f32, volume: f32, sample: f32, sample_rate: f3
         (sample + 1.0, -volume)
     } else {
         (0.0, volume)
+    }
+}
+
+fn tirangle_wave(period: f32, sample: f32, sample_rate: f32) -> (f32, f32) {
+    let t: f32 = (sample / sample_rate) % period;
+    if t < period / 2.0 {
+        (sample + 1.0, 1.0 - t * 4.0 / period)
+    } else if t < period {
+        (sample + 1.0, t * 4.0 / period - 3.0)
+    } else {
+        (0.0, 1.0)
     }
 }
 
