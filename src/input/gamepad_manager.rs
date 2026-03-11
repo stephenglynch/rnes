@@ -4,37 +4,7 @@
 
 use gilrs::{Gilrs, Event, EventType};
 use std::thread;
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-
-#[derive(Default, Clone, Debug)]
-pub struct GamepadState {
-    a: bool,
-    b: bool,
-    select: bool,
-    start: bool,
-    up: bool,
-    down: bool,
-    left: bool,
-    right: bool,
-}
-
-impl GamepadState {
-    pub fn serialise(&self) -> [u8; 8] {
-        [
-            self.right,
-            self.left,
-            self.down,
-            self.up,
-            self.start,
-            self.select,
-            self.b,
-            self.a,
-        ].map(|x| x as u8)
-    }
-}
-
-pub type ActiveGamepads = Arc<Mutex<VecDeque<(usize, GamepadState)>>>;
+use super::ActiveGamepads;
 
 pub struct GamepadManager {
     gilrs: Gilrs,
@@ -42,19 +12,15 @@ pub struct GamepadManager {
 }
 
 impl GamepadManager {
-    pub fn new() -> Self {
+    pub fn new(gamepads: ActiveGamepads) -> Self {
         let gilrs = Gilrs::new().unwrap();
-        let gamepads = Arc::new(Mutex::new(gilrs.gamepads().map(|(id, _)| {
+        gamepads.lock().unwrap().extend(gilrs.gamepads().map(|(id, _)| {
             (id.into(), Default::default())
-        }).collect()));
+        }));
         GamepadManager {
             gilrs: gilrs,
             gamepads: gamepads,
         }
-    }
-
-    pub fn get_gamepads(&self) -> ActiveGamepads {
-        self.gamepads.clone()
     }
 
     pub fn start(mut self) {

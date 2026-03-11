@@ -12,21 +12,21 @@ use crate::system::Cpu;
 use crate::parse_ines::INes;
 use crate::clock::Clock;
 use crate::renderer::Renderer;
-use crate::gamepad_manager::GamepadManager;
+use crate::input::InputManager;
 use crate::mapper::generate_mapper;
 
 const CYCLES_TO_RUN: usize = 100000000;
 
 pub fn execute_rom(ines: INes) -> Result<(), Box<dyn std::error::Error>> {
     // Create renderer
-    let renderer = Renderer::new();
+    let input_manager= InputManager::new(true);
+
+    let renderer = Renderer::new(|key| input_manager.handle_key_event(key));
     let frame_buffer = renderer.get_frame_buffer();
 
     let audio = Audio::new()?;
 
-    let gamepad_manager = GamepadManager::new();
-    let gamepads = gamepad_manager.get_gamepads();
-    gamepad_manager.start();
+    let gamepads = input_manager.get_gamepads();
 
     thread::spawn(move || {
         // Build NES components

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use pixels::{Error, Pixels, SurfaceTexture};
 use winit::dpi::LogicalSize;
-use winit::event::{Event, WindowEvent};
+use winit::event::{Event, WindowEvent, KeyEvent};
 use winit::event_loop::EventLoop;
 use winit::keyboard::KeyCode;
 use winit::window::WindowBuilder;
@@ -12,14 +12,16 @@ use crate::ppu::{WIDTH, HEIGHT};
 
 pub type FrameBuffer = Arc<Mutex<[u8; WIDTH * HEIGHT * 4]>>;
 
-pub struct Renderer {
-    frame: FrameBuffer
+pub struct Renderer<T: FnMut(KeyEvent)> {
+    frame: FrameBuffer,
+    keyboard_cb: T
 }
 
-impl Renderer {
-    pub fn new() -> Self {
+impl<T: FnMut(KeyEvent)> Renderer<T> {
+    pub fn new(keyboard_cb: T) -> Self {
         Self {
-            frame: Arc::new(Mutex::new([0; WIDTH * HEIGHT * 4]))
+            frame: Arc::new(Mutex::new([0; WIDTH * HEIGHT * 4])),
+            keyboard_cb: keyboard_cb
         }
     }
 
@@ -27,7 +29,7 @@ impl Renderer {
         self.frame.clone()
     }
 
-    pub fn run(self) -> Result<(), Error> {
+    pub fn run(mut self) -> Result<(), Error> {
         let event_loop: EventLoop<()> = EventLoop::new().unwrap();
         let mut input = WinitInputHelper::new();
         let window = {
@@ -59,6 +61,14 @@ impl Renderer {
                     elwt.exit();
                     return;
                 }
+            }
+
+            if let Event::WindowEvent {
+                event: WindowEvent::KeyboardInput { device_id: _, event: key_event, is_synthetic: _ },
+                ..
+            } = &event
+            {
+                (self.keyboard_cb)(key_event.clone());
             }
 
             // Handle input events

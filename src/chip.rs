@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use crate::audio::{Audio, AudioInterface, Sound};
-use crate::gamepad_manager::ActiveGamepads;
+use crate::input::ActiveGamepads;
 use crate::clock::{Clock, CycleDelay};
 
 // Awaits a certain number of APU clock cycles (2x CPU cycles)

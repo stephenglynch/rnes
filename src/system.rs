@@ -5,7 +5,6 @@ use crate::chip::Chip;
 use crate::instructions::{execute, interrupt};
 use crate::ppu::Ppu;
 use crate::clock::{Clock, CycleDelay};
-use crate::gamepad_manager::ActiveGamepads;
 use crate::mapper::Mapper;
 
 // Awaits a certain number of CPU clocks cycles (3x PPU cycles)

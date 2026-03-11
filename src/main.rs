@@ -12,7 +12,7 @@ mod clock;
 mod chip;
 mod ppu;
 mod renderer;
-mod gamepad_manager;
+mod input;
 mod audio;
 
 #[derive(Parser)]
