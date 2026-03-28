@@ -125,9 +125,11 @@ impl VramAddr {
     fn set_y(self, y_val: u16) -> Self {
         let mut v = self.0;
         v &= !0b01111011_11100000; // Clear y bits
-        v |= (y_val & 0b11111000) << 2; // Set y course bits
         v |= (y_val & 0b00000111) << 12; //  Set y fine bits
-        v |= (y_val & 0b00000001_00000000) << 3; // Set scroll bit 8
+        let nt_bit = (y_val / 240) & 0x1; // If we are larger than 240 then we use nametable bit
+        let y_val = y_val % 240; // We wrap on 240
+        v |= (y_val & 0b11111000) << 2; // Set y course bits
+        v |= nt_bit << 11; // Set scroll bit 8
         VramAddr(v)
     }
 
@@ -556,5 +558,19 @@ mod tests {
         let vram = VramAddr(0x05ff);
         let vram = vram.x_course_increment();
         assert_eq!(vram.0, 0x01e0);
+    }
+
+    #[test]
+    fn test_vram_y_incr_1() {
+        let vram = VramAddr(0x73a2);
+        let vram = vram.y_increment();
+        assert_eq!(vram.0, 0x0802);
+    }
+
+    #[test]
+    fn test_vram_y_incr_2() {
+        let vram = VramAddr(0x7002);
+        let vram = vram.y_increment();
+        assert_eq!(vram.0, 0x0022);
     }
 }
