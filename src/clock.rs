@@ -6,8 +6,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::{Instant, Duration};
 use std::thread::sleep;
+use std::sync::Arc;
+use crate::system_control::SystemControl;
 
 const CYCLE_PERIOD: Duration = Duration::from_nanos(186);
+
+type Sleeper = (Waker, bool, bool);
 
 pub struct Clock {
     pub current_cycle: u64,
@@ -16,16 +20,18 @@ pub struct Clock {
     last_catchup_time: Instant,
     last_catchup_cycle: u64,
     // Tasks waiting for a specific cycle to pass
-    sleepers: BTreeMap<u64, Vec<(Waker, bool)>>,
+    sleepers: BTreeMap<u64, Vec<Sleeper>>,
+    system_control: Arc<SystemControl>
 }
 
 impl Clock {
-    pub fn new() -> Self {
+    pub fn new(system_control: Arc<SystemControl>) -> Self {
         Clock {
             current_cycle: 3 * 7, // The starting cycle number for thge CPU
             last_catchup_time: Instant::now(),
             last_catchup_cycle: 0,
-            sleepers: BTreeMap::new() // TODO: This generates expensive heap allocations and is bottle necking performance
+            sleepers: BTreeMap::new(), // TODO: This generates expensive heap allocations and is bottle necking performance
+            system_control: system_control
         }
     }
 
@@ -33,7 +39,7 @@ impl Clock {
         self.current_cycle += 1;
         // Wake up everyone waiting for this specific cycle
         if let Some(wakers) = self.sleepers.remove(&self.current_cycle) {
-            for (waker, catchup) in wakers {
+            for (waker, catchup, frame_done) in wakers {
                 // Wait if there's a request to catchup
                 if catchup {
                     let duration_cycles = self.current_cycle - self.last_catchup_cycle;
@@ -47,6 +53,12 @@ impl Clock {
                     self.last_catchup_cycle = self.current_cycle;
                     self.last_catchup_time = now;
                 }
+
+                // Check if there's a pause request blocking if necessary
+                if frame_done {
+                    self.system_control.wait_on_pause();
+                }
+
                 waker.wake();
             }
         }
@@ -56,7 +68,8 @@ impl Clock {
 pub struct CycleDelay {
     clock: Rc<RefCell<Clock>>,
     until: u64,
-    catchup: bool // Do we try and catch up to current real time
+    catchup: bool, // Do we try and catch up to current real time
+    frame_done: bool // Indicates frame has been completed
 }
 
 impl CycleDelay {
@@ -65,7 +78,18 @@ impl CycleDelay {
         CycleDelay {
             clock: clock,
             until: current_cycle + until,
-            catchup: catchup
+            catchup: catchup,
+            frame_done: false
+        }
+    }
+
+    pub fn frame_done(clock: Rc<RefCell<Clock>>, frame_done: bool) -> Self {
+        let current_cycle = clock.borrow().current_cycle;
+        CycleDelay {
+            clock: clock,
+            until: current_cycle + 1,
+            catchup: false,
+            frame_done: frame_done
         }
     }
 }
@@ -82,7 +106,7 @@ impl Future for CycleDelay {
             clock.sleepers
                 .entry(self.until)
                 .or_default()
-                .push((cx.waker().clone(), self.catchup));
+                .push((cx.waker().clone(), self.catchup, self.frame_done));
             Poll::Pending
         }
     }

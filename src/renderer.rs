@@ -6,6 +6,7 @@ use winit::event_loop::EventLoop;
 use winit::keyboard::KeyCode;
 use winit::window::WindowBuilder;
 use winit_input_helper::WinitInputHelper;
+use crate::system_control::SystemControl;
 use crate::ppu::{WIDTH, HEIGHT};
 
 /// Representation of the application state. In this example, a box will bounce around the screen.
@@ -14,14 +15,16 @@ pub type FrameBuffer = Arc<Mutex<[u8; WIDTH * HEIGHT * 4]>>;
 
 pub struct Renderer<T: FnMut(KeyEvent)> {
     frame: FrameBuffer,
-    keyboard_cb: T
+    keyboard_cb: T,
+    system_control: Arc<SystemControl>
 }
 
 impl<T: FnMut(KeyEvent)> Renderer<T> {
-    pub fn new(keyboard_cb: T) -> Self {
+    pub fn new(keyboard_cb: T, system_control: Arc<SystemControl>) -> Self {
         Self {
             frame: Arc::new(Mutex::new([0; WIDTH * HEIGHT * 4])),
-            keyboard_cb: keyboard_cb
+            keyboard_cb: keyboard_cb,
+            system_control: system_control
         }
     }
 
@@ -77,6 +80,11 @@ impl<T: FnMut(KeyEvent)> Renderer<T> {
                 if input.key_pressed(KeyCode::Escape) || input.close_requested() {
                     elwt.exit();
                     return;
+                }
+
+                if input.key_pressed(KeyCode::Backspace) {
+                    println!("Pause button pressed!");
+                    self.system_control.toggle_pause();
                 }
 
                 // Resize the window

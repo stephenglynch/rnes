@@ -14,6 +14,7 @@ mod ppu;
 mod renderer;
 mod input;
 mod audio;
+mod system_control;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

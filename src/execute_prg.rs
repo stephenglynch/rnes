@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::SystemTime;
 use std::thread;
 use futures::executor::LocalPool;
@@ -14,6 +15,7 @@ use crate::clock::Clock;
 use crate::renderer::Renderer;
 use crate::input::InputManager;
 use crate::mapper::generate_mapper;
+use crate::system_control::SystemControl;
 
 const CYCLES_TO_RUN: usize = 100000000;
 
@@ -21,7 +23,8 @@ pub fn execute_rom(ines: INes) -> Result<(), Box<dyn std::error::Error>> {
     // Create renderer
     let input_manager= InputManager::new(true);
 
-    let renderer = Renderer::new(|key| input_manager.handle_key_event(key));
+    let system_control = Arc::new(SystemControl::new());
+    let renderer = Renderer::new(|key| input_manager.handle_key_event(key), system_control.clone());
     let frame_buffer = renderer.get_frame_buffer();
 
     let audio = Audio::new()?;
@@ -30,7 +33,7 @@ pub fn execute_rom(ines: INes) -> Result<(), Box<dyn std::error::Error>> {
 
     thread::spawn(move || {
         // Build NES components
-        let clock  = Rc::new(RefCell::new(Clock::new()));
+        let clock  = Rc::new(RefCell::new(Clock::new(system_control)));
         let mapper  = generate_mapper(ines);
         let chip = Rc::new(RefCell::new(Chip::new(clock.clone(), audio, gamepads)));
         let ppu    = Rc::new(Ppu::new(clock.clone(), mapper.clone(), frame_buffer));

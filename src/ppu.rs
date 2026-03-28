@@ -28,6 +28,12 @@ macro_rules! catchup {
     }
 }
 
+macro_rules! frame_done {
+    ($ppu:expr) => {
+        CycleDelay::frame_done($ppu.clock.clone(), true).await
+    }
+}
+
 bitflags! {
     /// Represents a set of flags.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -314,6 +320,7 @@ impl Ppu {
             catchup!(self, 340 + 341 * 19);
 
             self.write_to_frame_buffer(&frame);
+            frame_done!(self);
 
             odd_frame = !odd_frame;
         }
