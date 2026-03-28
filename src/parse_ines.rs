@@ -28,6 +28,7 @@ pub struct INes {
     pub submapper: u8,
     pub trainer: Option<Vec<u8>>,
     pub chr_rom: Option<Vec<u8>>,
+    pub vertical_mirroring: bool
 }
 
 pub fn read_ines(filename: &Path) -> Option<INes> {
@@ -42,6 +43,9 @@ pub fn read_ines(filename: &Path) -> Option<INes> {
     let flags7 = Flags7::from_bits(raw[7] & 0x0f)?;
 
     let nes2 = (flags7 & Flags7::NES_VERSION).contains(Flags7::NES_VERSION_BIT1);
+
+    let vertical_mirroring = flags6.contains(Flags6::NAME_TABLE_ARRANGEMENT);
+    println!("Catridge uses {} mirroring", if vertical_mirroring {"vertical"} else {"horizontal"});
 
     let trainer_used = flags6.contains(Flags6::TRAINER_PRESENT);
     let trainer_size = if trainer_used {512} else {0};
@@ -90,5 +94,6 @@ pub fn read_ines(filename: &Path) -> Option<INes> {
         submapper: submapper,
         trainer: trainer,
         chr_rom: chr_rom,
+        vertical_mirroring: vertical_mirroring
     })
 }
