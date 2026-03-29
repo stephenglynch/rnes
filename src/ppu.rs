@@ -150,7 +150,7 @@ impl VramAddr {
     }
 
     fn set_x_raw(&self, other: Self) -> Self {
-        let mask = 0b00001100_00011111;
+        let mask = 0b00000100_00011111;
         let mut new_v = self.0 & !mask;
         let other = other.0;
         new_v |= other & mask;
@@ -158,7 +158,7 @@ impl VramAddr {
     }
 
     fn set_y_raw(&self, other: Self) -> Self {
-        let mask = 0b01110011_11100000;
+        let mask = 0b01111011_11100000;
         let mut new_v = self.0 & !mask;
         let other = other.0;
         new_v |= other & mask;
