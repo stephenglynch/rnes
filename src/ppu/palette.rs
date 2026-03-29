@@ -25,7 +25,7 @@ pub enum Colour {
     // colour as sprite0 hits only apply to background
     Transparent,
     Rgb(Rgb),
-    Sprite0(Rgb)
+    Sprite(Rgb, bool, bool),
 }
 
 #[derive(Clone, Copy)]
@@ -52,10 +52,10 @@ impl Colour {
         Colour::Transparent
     }
 
-    pub fn to_sprite0(self) -> Self {
+    pub fn to_sprite(self, sprite_zero: bool, priority: bool) -> Self {
         match self {
-            Colour::Rgb(rgb) => Colour::Sprite0(rgb),
-            Colour::Sprite0(rgb) => Colour::Sprite0(rgb),
+            Colour::Rgb(rgb) => Colour::Sprite(rgb, sprite_zero, priority),
+            Colour::Sprite(rgb, z, p) => Colour::Sprite(rgb, z, p),
             Colour::Transparent => Colour::Transparent
         }
     }
@@ -71,10 +71,12 @@ impl Colour {
     pub fn combine(self, other: Self) -> Self {
         match (self, other) {
             (Colour::Transparent, Colour::Transparent) => Colour::Transparent,
-            (Colour::Sprite0(rgb), Colour::Transparent) => Colour::Sprite0(rgb),
+            (Colour::Sprite(rgb, z, p), Colour::Transparent) => Colour::Sprite(rgb, z, p),
             (Colour::Rgb(rgb), Colour::Transparent) => Colour::Rgb(rgb),
-            (_, Colour::Sprite0(rgb)) => Colour::Sprite0(rgb),
-            (_, Colour::Rgb(rgb)) => Colour::Rgb(rgb),
+            (Colour::Rgb(rgb), Colour::Sprite(_, _, true)) => Colour::Rgb(rgb),
+            (Colour::Rgb(_), Colour::Sprite(rgb, z, false)) => Colour::Sprite(rgb, z, false),
+            (_, Colour::Sprite(rgb, z, p)) => Colour::Sprite(rgb, z, p),
+            (_, Colour::Rgb(rgb),) => Colour::Rgb(rgb),
         }
     }
 }

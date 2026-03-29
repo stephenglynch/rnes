@@ -414,16 +414,24 @@ impl Ppu {
         let backdrop = self.palette_ram.borrow().backdrop_colour();
         let mut drawn_chunk = [Rgb::new(); 8];
         background.iter().zip(sprite.iter()).enumerate().for_each(|(i, pair)| {
+            let (&a, &b) = pair;
+            let pair = (a, b);
             drawn_chunk[i] = match pair {
                 (Colour::Transparent, Colour::Transparent) => backdrop,
-                (Colour::Rgb(_), Colour::Sprite0(sprite_rgb)) => {
-                    self.ppu_status.set(self.ppu_status.get() | PpuStatus::SPRITE_0_HIT);
-                    *sprite_rgb
+                (Colour::Rgb(background_rgb), Colour::Sprite(sprite_rgb, sprite0, priority)) => {
+                    if sprite0 {
+                        self.ppu_status.set(self.ppu_status.get() | PpuStatus::SPRITE_0_HIT);
+                    }
+                    if !priority {
+                        sprite_rgb
+                    } else {
+                        background_rgb
+                    }
                 },
-                (Colour::Rgb(_), Colour::Rgb(sprite_rgb)) => *sprite_rgb,
-                (Colour::Transparent, Colour::Sprite0(sprite_rgb)) => *sprite_rgb,
-                (Colour::Transparent, Colour::Rgb(sprite_rgb)) => *sprite_rgb,
-                (Colour::Rgb(bg_rgb), Colour::Transparent) => *bg_rgb,
+                (Colour::Rgb(_), Colour::Rgb(sprite_rgb)) => sprite_rgb,
+                (Colour::Transparent, Colour::Sprite(sprite_rgb, _, _)) => sprite_rgb,
+                (Colour::Transparent, Colour::Rgb(sprite_rgb)) => sprite_rgb,
+                (Colour::Rgb(bg_rgb), Colour::Transparent) => bg_rgb,
                 _ => panic!("No match for {:?}", pair)
             }
         });

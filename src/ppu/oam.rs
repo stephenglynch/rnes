@@ -127,6 +127,7 @@ impl Oam {
         for (sprite, sprite_num) in self.secondary.iter() {
             let flip_x = sprite.attributes.contains(OamAttributes::FLIP_HORIZONTALLY);
             let flip_y = sprite.attributes.contains(OamAttributes::FLIP_VERTICALLY);
+            let priority = sprite.attributes.contains(OamAttributes::PRIORITY);
             let mut sprite_y = y - sprite.y_pos as i32;
             if flip_y {
                 sprite_y = 7 - sprite_y;
@@ -150,11 +151,8 @@ impl Oam {
                     let colour_id = (bit0 as usize) | ((bit1 as usize) << 1);
                     // Get colour from palette
                     let palette_ram: std::cell::Ref<'_, PaletteRam> = self.palette_ram.borrow();
-                    let mut colour = palette_ram.rgb_lookup(palette_id, colour_id, true);
-                    if *sprite_num == 0 {
-                        colour = colour.to_sprite0();
-                    }
-                    colour
+                    let colour = palette_ram.rgb_lookup(palette_id, colour_id, true);
+                    colour.to_sprite(*sprite_num == 0, priority)
                 } else {
                     Colour::Transparent
                 };
