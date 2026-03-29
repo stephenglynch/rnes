@@ -27,7 +27,7 @@ pub struct Clock {
 impl Clock {
     pub fn new(system_control: Arc<SystemControl>) -> Self {
         Clock {
-            current_cycle: 3 * 7, // The starting cycle number for thge CPU
+            current_cycle: 3 * 7, // The starting cycle number for the CPU
             last_catchup_time: Instant::now(),
             last_catchup_cycle: 0,
             sleepers: BTreeMap::new(), // TODO: This generates expensive heap allocations and is bottle necking performance
@@ -49,9 +49,11 @@ impl Clock {
                     if wakeup_time > now {
                         let wait_duration = wakeup_time - now;
                         sleep(wait_duration);
+                        self.last_catchup_time = wakeup_time;
+                    } else {
+                        self.last_catchup_time = now;
                     }
                     self.last_catchup_cycle = self.current_cycle;
-                    self.last_catchup_time = now;
                 }
 
                 // Check if there's a pause request blocking if necessary
