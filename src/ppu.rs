@@ -1,5 +1,3 @@
-// TODO: Support palettes
-
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use bitflags::bitflags;
@@ -365,7 +363,7 @@ impl Ppu {
     }
 
     fn palette_lookup(&self, course_x: u16, course_y: u16, nt_sel: u16) -> usize {
-        let at = self.mmu_load((course_x >> 2) | ((course_y >> 2) << 3) | (nt_sel << 6) | 0x23c0);
+        let at = self.mmu_load((course_x >> 2) | ((course_y >> 2) << 3) | (nt_sel << 10) | 0x23c0);
         (match (course_x & 0b10 != 0, course_y & 0b10 != 0) {
             (false, false) => at & 0b00000011,
             (false, true)  => (at & 0b00110000) >> 4,
