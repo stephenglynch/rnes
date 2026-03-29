@@ -141,12 +141,25 @@ impl VramAddr {
         self.set_x(x)
     }
 
+    // Based off psuedocode on nesdev
     fn y_increment(self) -> Self {
-        let v = self.0;
-        // Get actual y value
-        let mut y = ((v & 0b1110000_00000000) >> 12) | ((v & 0b11_11100000) >> 2) | ((v & 0b1000_00000000) >> 3);
-        y += 1;
-        self.set_y(y)
+        let mut v = self.0;
+        if (v & 0x7000) != 0x7000 {             // if fine Y < 7
+            v += 0x1000;                        // increment fine Y
+        } else {
+            v &= !0x7000;                       // fine Y = 0
+            let mut y = (v & 0x03E0) >> 5; // let y = coarse Y
+            if y >= 29 {
+                y = 0;                          // coarse Y = 0
+                v ^= 0x0800;                    // switch vertical nametable
+            } else if y == 31 {
+                y = 0;                          // coarse Y = 0, nametable not switched
+            } else {
+                y += 1;                         // increment coarse Y
+            }
+            v = (v & !0x03E0) | (y << 5)        // put coarse Y back into v
+        }
+        Self(v)
     }
 
     fn set_x_raw(&self, other: Self) -> Self {
@@ -572,5 +585,12 @@ mod tests {
         let vram = VramAddr(0x7002);
         let vram = vram.y_increment();
         assert_eq!(vram.0, 0x0022);
+    }
+
+    #[test]
+    fn test_vram_y_incr_3() {
+        let vram = VramAddr(0x0802);
+        let vram = vram.y_increment();
+        assert_eq!(vram.0, 0x1802);
     }
 }
