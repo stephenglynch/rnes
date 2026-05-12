@@ -3,6 +3,7 @@ use std::rc::Rc;
 use crate::parse_ines::INes;
 
 mod mapper0;
+mod mapper1;
 
 pub trait Mapper {
     fn get(&mut self, loc: usize) -> u8;
@@ -12,5 +13,9 @@ pub trait Mapper {
 }
 
 pub fn generate_mapper(ines: INes) -> Rc<RefCell<dyn Mapper>> {
-    Rc::new(RefCell::new(mapper0::Mapper0::new(ines)))
+    match ines.mapper {
+        0 => Rc::new(RefCell::new(mapper0::Mapper0::new(ines))),
+        1 => Rc::new(RefCell::new(mapper1::Mapper1::new(ines))),
+        _ => unimplemented!()
+    }
 }
