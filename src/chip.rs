@@ -201,11 +201,11 @@ impl Triangle {
                 // Do nothing
             },
             2 => {
-                self.timer &= 0x00ff;
+                self.timer &= !0x00ff;
                 self.timer |= val as u16;
             },
             3 => {
-                self.timer &= 0x0f00;
+                self.timer &= !0x0f00;
                 self.timer |= (val as u16 & 0x07) << 8;
                 self.length = LENGTH_TABLE[(val >> 3) as usize];
                 self.counter_reload_flag = true;
