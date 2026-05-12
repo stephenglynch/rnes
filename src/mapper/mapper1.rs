@@ -90,8 +90,8 @@ impl Mapper1 {
         // addr 0x0000 - 0x7fff
         let addr = addr & 0x7fff;
         let rom_bits = (
-            self.control.contains(ControlBits::PRG_BANK_MODE_0),
-            self.control.contains(ControlBits::PRG_BANK_MODE_1)
+            self.control.contains(ControlBits::PRG_BANK_MODE_1),
+            self.control.contains(ControlBits::PRG_BANK_MODE_0)
         );
         match rom_bits {
             // Switch 32 kB
