@@ -83,7 +83,7 @@ pub fn read_ines(filename: &Path) -> Option<INes> {
         Option::None
     };
 
-    let mapper_lo = (raw[6] & 0xf0) >> 4 & (raw[7] & 0xf0);
+    let mapper_lo = ((raw[6] & 0xf0) >> 4) | (raw[7] & 0xf0);
     let mapper_hi = raw[8] & 0x0f;
     let mapper = (mapper_hi as u16) << 8 | (mapper_lo as u16);
     let submapper = (raw[8] & 0xf0) >> 4;
