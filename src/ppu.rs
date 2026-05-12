@@ -120,22 +120,30 @@ impl VramAddr {
         VramAddr(v)
     }
 
+    fn get_x(self) -> u16 {
+        let v = self.0;
+        let x_course = (v & 0b11111) | ((v & 0b100_00000000) >> 5);
+        x_course << 3
+    }
+
     fn set_y(self, y_val: u16) -> Self {
         let mut v = self.0;
         v &= !0b01111011_11100000; // Clear y bits
         v |= (y_val & 0b00000111) << 12; //  Set y fine bits
-        let nt_bit = (y_val / 240) & 0x1; // If we are larger than 240 then we use nametable bit
-        let y_val = y_val % 240; // We wrap on 240
         v |= (y_val & 0b11111000) << 2; // Set y course bits
-        v |= nt_bit << 11; // Set scroll bit 8
+        v |= (y_val & 0b100000000) << 3; // Set scroll bit 8
         VramAddr(v)
     }
 
-    fn x_course_increment(self) -> Self {
+    fn get_y(self) -> u16 {
         let v = self.0;
-        let mut x_course = (v & 0b11111) | ((v & 0b100_00000000) >> 5);
-        x_course += 1;
-        let x = x_course << 3;
+        //NT bit               y-course             y-fine
+        ((v & 0x800) >> 3) | ((v & 0x3e0) >> 2) | ((v & 0x7000) >> 12)
+    }
+
+    fn x_course_increment(self) -> Self {
+        let mut x = self.get_x();
+        x += 8;
         self.set_x(x)
     }
 
@@ -477,12 +485,12 @@ impl Ppu {
             5 => {
                 let t = self.t_reg.get();
                 self.t_reg.set(if !write_toggle {
-                    let t = t.set_x(val as u16);
-                    let x_fine = 0b0111 & val;
-                    self.x_fine_reg.set(x_fine);
-                    t
+                    self.x_fine_reg.set(0b0111 & val);
+                    let nt_bit = t.get_x() & !0x0ff; // Clear non-nametable bits
+                    t.set_x(nt_bit | val as u16)
                 } else {
-                    t.set_y(val as u16)
+                    let nt_bit = t.get_y() & !0x0ff; // Clear non-nametable bits
+                    t.set_y(nt_bit | val as u16)
                 });
                 self.write_toggle.set(!write_toggle);
             },
