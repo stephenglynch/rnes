@@ -30,8 +30,8 @@ impl KeyboardManager {
                 KeyCode::KeyD => &mut gamepad.right,
                 KeyCode::KeyU => &mut gamepad.select,
                 KeyCode::KeyI => &mut gamepad.start,
-                KeyCode::KeyJ => &mut gamepad.a,
-                KeyCode::KeyK => &mut gamepad.b,
+                KeyCode::KeyK => &mut gamepad.a,
+                KeyCode::KeyJ => &mut gamepad.b,
                 _ => &mut unused
             }) = pressed;
         }
