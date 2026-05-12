@@ -36,9 +36,9 @@ impl<T: FnMut(KeyEvent)> Renderer<T> {
         let event_loop: EventLoop<()> = EventLoop::new().unwrap();
         let mut input = WinitInputHelper::new();
         let window = {
-            let size = LogicalSize::new(WIDTH as f64, HEIGHT as f64);
+            let size = LogicalSize::new((WIDTH*2) as f64, (HEIGHT*2) as f64);
             WindowBuilder::new()
-                .with_title("Hello Pixels")
+                .with_title("RNES")
                 .with_inner_size(size)
                 .with_min_inner_size(size)
                 .build(&event_loop)
