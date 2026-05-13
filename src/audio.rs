@@ -3,9 +3,11 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     Device, FromSample, Host, I24, Sample, SizedSample, Stream, SupportedStreamConfig
 };
+use filter::LowPassFilter;
+
+mod filter;
 
 pub struct Audio {
-    host: Host,
     device: Device,
     config: SupportedStreamConfig,
 }
@@ -13,6 +15,10 @@ pub struct Audio {
 pub struct AudioInterface {
     pub tx: Sender<Sound>,
     stream: Stream,
+}
+
+struct OutputFilter {
+    low_pass: filter::LowPassFilter
 }
 
 #[derive(Clone, PartialEq)]
@@ -42,7 +48,7 @@ fn gen_sound(sound: &Sound, sample: f32, sample_rate: f32) -> (f32, f32) {
 
 fn square_wave(period: f32, duty: f32, volume: f32, sample: f32, sample_rate: f32) -> (f32, f32) {
     let t = (sample / sample_rate) % period;
-    let volume = 0.00752 * volume;
+    let volume = 0.1128 * volume;
     if t < duty * period {
         (sample + 1.0, volume)
     } else if t < period {
@@ -54,13 +60,26 @@ fn square_wave(period: f32, duty: f32, volume: f32, sample: f32, sample_rate: f3
 
 fn triangle_wave(period: f32, sample: f32, sample_rate: f32) -> (f32, f32) {
     let t: f32 = (sample / sample_rate) % period;
-    let volume = 0.00851;
+    let volume = 0.12765;
     if t < period / 2.0 {
         (sample + 1.0, (1.0 - t * 4.0 / period) * volume)
     } else if t < period {
         (sample + 1.0, (t * 4.0 / period - 3.0) * volume)
     } else {
         (0.0, volume)
+    }
+}
+
+impl OutputFilter {
+    fn new(sample_period: f32) -> Self {
+        Self {
+            low_pass: LowPassFilter::new(sample_period, 14e3) // 14 kHz
+        }
+    }
+
+    fn apply(&mut self, x: f32) -> f32 {
+        let y = self.low_pass.apply(x);
+        y
     }
 }
 
@@ -90,7 +109,6 @@ impl Audio {
         println!("Default output config: {config:?}");
 
         Ok(Audio {
-            host: host,
             device: device,
             config: config.into(),
         })
@@ -98,21 +116,23 @@ impl Audio {
 
     pub fn create_interface(&self) -> anyhow::Result<AudioInterface>  {
         let (tx, rx) = channel();
+        let sample_rate = self.config.sample_rate() as f32;
+        let filter = OutputFilter::new(sample_rate);
         let stream = match self.config.sample_format() {
-            cpal::SampleFormat::I8 => self.run::<i8>(rx),
-            cpal::SampleFormat::I16 => self.run::<i16>(rx),
-            cpal::SampleFormat::I24 => self.run::<I24>(rx),
-            cpal::SampleFormat::I32 => self.run::<i32>(rx),
-            // cpal::SampleFormat::I48 => self.run::<I48>(rx),
-            cpal::SampleFormat::I64 => self.run::<i64>(rx),
-            cpal::SampleFormat::U8 => self.run::<u8>(rx),
-            cpal::SampleFormat::U16 => self.run::<u16>(rx),
-            // cpal::SampleFormat::U24 => self.run::<U24>(rx),
-            cpal::SampleFormat::U32 => self.run::<u32>(rx),
-            // cpal::SampleFormat::U48 => self.run::<U48>(rx),
-            cpal::SampleFormat::U64 => self.run::<u64>(rx),
-            cpal::SampleFormat::F32 => self.run::<f32>(rx),
-            cpal::SampleFormat::F64 => self.run::<f64>(rx),
+            cpal::SampleFormat::I8 => self.run::<i8>(rx, filter),
+            cpal::SampleFormat::I16 => self.run::<i16>(rx, filter),
+            cpal::SampleFormat::I24 => self.run::<I24>(rx, filter),
+            cpal::SampleFormat::I32 => self.run::<i32>(rx, filter),
+            // cpal::SampleFormat::I48 => self.run::<I48>(rx, filter),
+            cpal::SampleFormat::I64 => self.run::<i64>(rx, filter),
+            cpal::SampleFormat::U8 => self.run::<u8>(rx, filter),
+            cpal::SampleFormat::U16 => self.run::<u16>(rx, filter),
+            // cpal::SampleFormat::U24 => self.run::<U24>(rx, filter),
+            cpal::SampleFormat::U32 => self.run::<u32>(rx, filter),
+            // cpal::SampleFormat::U48 => self.run::<U48>(rx, filter),
+            cpal::SampleFormat::U64 => self.run::<u64>(rx, filter),
+            cpal::SampleFormat::F32 => self.run::<f32>(rx, filter),
+            cpal::SampleFormat::F64 => self.run::<f64>(rx, filter),
             sample_format => panic!("Unsupported sample format '{sample_format}'"),
         }?;
 
@@ -122,7 +142,7 @@ impl Audio {
         })
     }
 
-    fn run<T>(&self, rx: Receiver<Sound>) -> Result<Stream, anyhow::Error>
+    fn run<T>(&self, rx: Receiver<Sound>, mut filter: OutputFilter) -> Result<Stream, anyhow::Error>
     where
         T: SizedSample + FromSample<f32>,
     {
@@ -142,6 +162,7 @@ impl Audio {
                 }
             }
             let (next_sample, val) = gen_sound(&sound, wave_sample, sample_rate);
+            let val = filter.apply(val);
             wave_sample = next_sample;
             val
         };
