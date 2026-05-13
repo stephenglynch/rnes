@@ -65,12 +65,26 @@ fn triangle_wave(period: f32, sample: f32, sample_rate: f32) -> (f32, f32) {
 }
 
 impl Audio {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(audio_device: Option<String>) -> anyhow::Result<Self> {
         let host: cpal::Host = cpal::default_host();
 
-        let device = host.default_output_device()
-            .expect("failed to find output device");
-        println!("Output device: {}", device.id()?);
+        println!("Audio devices:");
+
+        let device;
+        if let Some(device_id) = audio_device {
+            device = host.device_by_id(&device_id.parse()
+                .expect("Could not parse audio device ID"))
+                .expect("Could not find audio device ID");
+        } else {
+            device = host.default_output_device()
+                .expect("failed to find output device");
+            println!("Using default device: {}", device.id()?);
+            println!("Other audio devices available:");
+            for device in host.devices().unwrap() {
+                let id = device.id().unwrap();
+                println!("{}", id.to_string());
+            }
+        }
 
         let config = device.default_output_config().unwrap();
         println!("Default output config: {config:?}");
