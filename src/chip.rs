@@ -165,6 +165,7 @@ impl Triangle {
 
         // Check if we generate a triangle wave
         if !self.muted && self.length > 0 && self.counter > 0 {
+            let period = (((self.timer + 1) * 32) as f32) / CPU_HZ;
             let _ = self.interface.tx.send(Sound::TriangleWave { period: period });
         } else {
             let _ = self.interface.tx.send(Sound::None);
