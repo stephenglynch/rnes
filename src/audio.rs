@@ -1,7 +1,7 @@
 use std::sync::mpsc::{Sender, Receiver, channel};
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    Device, FromSample, Host, I24, Sample, SizedSample, Stream, SupportedStreamConfig
+    Device, FromSample, I24, Sample, SizedSample, Stream, SupportedStreamConfig
 };
 use filter::LowPassFilter;
 
@@ -14,7 +14,7 @@ pub struct Audio {
 
 pub struct AudioInterface {
     pub tx: Sender<Sound>,
-    stream: Stream,
+    _stream: Stream,
 }
 
 struct OutputFilter {
@@ -58,15 +58,30 @@ fn square_wave(period: f32, duty: f32, volume: f32, sample: f32, sample_rate: f3
     }
 }
 
+const fn generate_triangle_lut() -> [f32; 32] {
+    let volume = 0.00851;
+    let mut lut = [0.0; 32];
+    let mut i = 0;
+    let raw = [
+        15, 14, 13, 12, 11, 10,  9,  8,  7,  6,  5,  4,  3,  2,  1,  0,
+        0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15
+    ];
+    while i < 32 {
+        lut[i] = (raw[i] as f32) * volume;
+        i += 1;
+    }
+    lut
+}
+
 fn triangle_wave(period: f32, sample: f32, sample_rate: f32) -> (f32, f32) {
     let t: f32 = (sample / sample_rate) % period;
-    let volume = 0.12765;
-    if t < period / 2.0 {
-        (sample + 1.0, (1.0 - t * 4.0 / period) * volume)
-    } else if t < period {
-        (sample + 1.0, (t * 4.0 / period - 3.0) * volume)
+    let lut = generate_triangle_lut();
+    let lut_i = (t / period * 32.0) as usize;
+
+    if lut_i < 32 {
+        (sample + 1.0, lut[lut_i])
     } else {
-        (0.0, volume)
+        (1.0, lut[lut_i])
     }
 }
 
@@ -138,7 +153,7 @@ impl Audio {
 
         Ok(AudioInterface {
             tx: tx,
-            stream: stream,
+            _stream: stream,
         })
     }
 
@@ -158,7 +173,8 @@ impl Audio {
             if let Ok(new_sound) = rx.try_recv() {
                 if new_sound != sound {
                     sound = new_sound;
-                    wave_sample = 0.0;
+                    // TODO: this sounds better but may need more thought
+                    // wave_sample = 0.0;
                 }
             }
             let (next_sample, val) = gen_sound(&sound, wave_sample, sample_rate);
