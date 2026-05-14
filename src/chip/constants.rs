@@ -1,0 +1,1 @@
+pub const CPU_HZ: f32 = 1.789773e6;

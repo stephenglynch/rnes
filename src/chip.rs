@@ -3,8 +3,12 @@ use std::rc::Rc;
 use crate::audio::{Audio, AudioInterface, Sound};
 use crate::input::ActiveGamepads;
 use crate::clock::{Clock, CycleDelay};
+use constants::CPU_HZ;
+use length_counter::LengthCounter;
 use envelope::Envelope;
 
+mod constants;
+mod length_counter;
 mod envelope;
 
 // Awaits a certain number of APU clock cycles (2x CPU cycles)
@@ -18,23 +22,20 @@ macro_rules! cycles {
 struct Pulse {
     id: usize,
     interface: AudioInterface,
-    enabled: bool,
     duty: u8,
-    counter_halt: bool,
+    length_counter: LengthCounter,
     envelope: Envelope,
     timer: u16,
-    length: u8,
     muted: bool
 }
 
 struct Triangle {
     interface: AudioInterface,
-    control_flag: bool,
     counter_reload_flag: bool,
     counter_reload: u8,
     counter: u8,
+    length_counter: LengthCounter,
     timer: u16,
-    length: u8,
     muted: bool
 }
 
@@ -50,11 +51,6 @@ pub struct Chip {
     int_set: bool
 }
 
-const CPU_HZ: f32 = 1.789773e6;
-const LENGTH_TABLE: [u8; 32] = [
-    10, 254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
-    12,  16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
-];
 const DUTY_TABLE: [f32; 4] = [0.125, 0.250, 0.500, 0.750];
 
 impl Pulse {
@@ -62,21 +58,17 @@ impl Pulse {
         Self {
             id: id,
             interface: interface,
-            enabled: false,
             duty: 0,
-            counter_halt: false,
+            length_counter: LengthCounter::new(),
             envelope: Envelope::new(),
             timer: 0,
-            length: 0,
             muted: muted
         }
     }
 
     fn tick(&mut self) {
-        if !self.counter_halt {
-            self.length = self.length.saturating_sub(1);
-        }
-        if !self.muted && self.length > 0 && self.timer >= 8 {
+        self.length_counter.tick();
+        if !self.muted && self.length_counter.unmuted() && self.timer >= 8 {
             let period = (((self.timer + 1) * 16) as f32) / CPU_HZ;
             // println!("Generating tone of {} Hz", 1.0/period);
             let duty = DUTY_TABLE[(self.duty & 0x03) as usize];
@@ -91,7 +83,7 @@ impl Pulse {
         match loc {
             0 => {
                 self.duty = (val & 0xc0) >> 6;
-                self.counter_halt = (val & 0x20) != 0;
+                self.length_counter.halt = (val & 0x20) != 0;
                 self.envelope.set_constant_vol((val & 0x10) != 0);
                 self.envelope.set_volume(val & 0x0f);
             },
@@ -105,7 +97,7 @@ impl Pulse {
             3 => {
                 self.timer &= !0x0f00;
                 self.timer |= (val as u16 & 0x07) << 8;
-                self.length = LENGTH_TABLE[(val >> 3) as usize];
+                self.length_counter.set(val >> 3);
                 self.envelope.set_start();
             }
             _ => unreachable!("Should not get here")
@@ -117,12 +109,11 @@ impl Triangle {
     fn new(interface: AudioInterface, muted: bool) -> Self {
         Self {
             interface: interface,
-            control_flag: false,
             counter_reload_flag: false,
             counter_reload: 0,
             counter: 0,
+            length_counter: LengthCounter::new(),
             timer: 0,
-            length: 0,
             muted: muted
         }
     }
@@ -130,7 +121,7 @@ impl Triangle {
     fn set_reg(&mut self, loc: usize, val: u8) {
         match loc {
             0 => {
-                self.control_flag = val & 0x80 != 0;
+                self.length_counter.halt = val & 0x80 != 0;
                 self.counter_reload = val & 0x7f;
             },
             1 => {
@@ -143,7 +134,7 @@ impl Triangle {
             3 => {
                 self.timer &= !0x0f00;
                 self.timer |= (val as u16 & 0x07) << 8;
-                self.length = LENGTH_TABLE[(val >> 3) as usize];
+                self.length_counter.set(val >> 3);
                 self.counter_reload_flag = true;
             }
             _ => unreachable!("Should not get here")
@@ -159,12 +150,12 @@ impl Triangle {
                 self.counter -= 1;
             }
         }
-        if !self.control_flag {
+        if !self.length_counter.halt {
             self.counter_reload_flag = false;
         }
 
         // Check if we generate a triangle wave
-        if !self.muted && self.length > 0 && self.counter > 0 {
+        if !self.muted && self.length_counter.unmuted() && self.counter > 0 {
             let period = (((self.timer + 1) * 32) as f32) / CPU_HZ;
             let _ = self.interface.tx.send(Sound::TriangleWave { period: period });
         } else {
@@ -173,9 +164,7 @@ impl Triangle {
     }
 
     fn tick_length_counter(&mut self) {
-        if !self.control_flag {
-            self.length = self.length.saturating_sub(1);
-        }
+        self.length_counter.tick();
     }
 }
 
@@ -222,19 +211,9 @@ impl Chip {
                 self.pulse2.set_reg(addr & 0x3, val);
             },
             0x15 => {
-                if val & 0x01 != 0 {
-                    self.pulse1.enabled = true;
-                } else {
-                    self.pulse1.enabled = false;
-                    self.pulse1.length = 0;
-                }
-
-                if val & 0x02 != 0 {
-                    self.pulse2.enabled = true;
-                } else {
-                    self.pulse2.enabled = false;
-                    self.pulse2.length = 0;
-                }
+                self.pulse1.length_counter.set_enabled(val & 0x01 != 0);
+                self.pulse2.length_counter.set_enabled(val & 0x02 != 0);
+                self.triangle.length_counter.set_enabled(val & 0x04 != 0);
             },
             0x08..0x0c => {
                 self.triangle.set_reg(addr & 0x3, val);
