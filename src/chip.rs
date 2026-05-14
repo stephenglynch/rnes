@@ -23,15 +23,8 @@ struct Pulse {
     counter_halt: bool,
     envelope: Envelope,
     timer: u16,
-    length: u8
-}
-
-struct Noise {
-    interface: AudioInterface,
-    enabled: bool,
-    mode: bool,
-    period: u8,
-    length: u8
+    length: u8,
+    muted: bool
 }
 
 struct Triangle {
@@ -41,7 +34,8 @@ struct Triangle {
     counter_reload: u8,
     counter: u8,
     timer: u16,
-    length: u8
+    length: u8,
+    muted: bool
 }
 
 pub struct Chip {
@@ -64,7 +58,7 @@ const LENGTH_TABLE: [u8; 32] = [
 const DUTY_TABLE: [f32; 4] = [0.125, 0.250, 0.500, 0.750];
 
 impl Pulse {
-    fn new(id: usize, interface: AudioInterface) -> Self {
+    fn new(id: usize, interface: AudioInterface, muted: bool) -> Self {
         Self {
             id: id,
             interface: interface,
@@ -73,7 +67,8 @@ impl Pulse {
             counter_halt: false,
             envelope: Envelope::new(),
             timer: 0,
-            length: 0
+            length: 0,
+            muted: muted
         }
     }
 
@@ -81,7 +76,7 @@ impl Pulse {
         if !self.counter_halt {
             self.length = self.length.saturating_sub(1);
         }
-        if self.length > 0 && self.timer >= 8 {
+        if !self.muted && self.length > 0 && self.timer >= 8 {
             let period = (((self.timer + 1) * 16) as f32) / CPU_HZ;
             // println!("Generating tone of {} Hz", 1.0/period);
             let duty = DUTY_TABLE[(self.duty & 0x03) as usize];
@@ -119,7 +114,7 @@ impl Pulse {
 }
 
 impl Triangle {
-    fn new(interface: AudioInterface) -> Self {
+    fn new(interface: AudioInterface, muted: bool) -> Self {
         Self {
             interface: interface,
             control_flag: false,
@@ -127,7 +122,8 @@ impl Triangle {
             counter_reload: 0,
             counter: 0,
             timer: 0,
-            length: 0
+            length: 0,
+            muted: muted
         }
     }
 
@@ -168,8 +164,7 @@ impl Triangle {
         }
 
         // Check if we generate a triangle wave
-        if self.length > 0 && self.counter > 0 {
-            let period = (((self.timer + 1) * 16) as f32) / CPU_HZ;
+        if !self.muted && self.length > 0 && self.counter > 0 {
             let _ = self.interface.tx.send(Sound::TriangleWave { period: period });
         } else {
             let _ = self.interface.tx.send(Sound::None);
@@ -185,9 +180,9 @@ impl Triangle {
 
 impl Chip {
     pub fn new(clock: Rc<RefCell<Clock>>, audio: Audio, active_gamepads: ActiveGamepads) -> Self {
-        let pulse1 = Pulse::new(1, audio.create_interface().unwrap());
-        let pulse2 = Pulse::new(2, audio.create_interface().unwrap());
-        let triangle = Triangle::new(audio.create_interface().unwrap());
+        let pulse1 = Pulse::new(1, audio.create_interface().unwrap(), false);
+        let pulse2 = Pulse::new(2, audio.create_interface().unwrap(), false);
+        let triangle = Triangle::new(audio.create_interface().unwrap(), false);
         Self {
             clock: clock,
             active_gamepads: active_gamepads,
