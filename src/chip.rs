@@ -3,6 +3,9 @@ use std::rc::Rc;
 use crate::audio::{Audio, AudioInterface, Sound};
 use crate::input::ActiveGamepads;
 use crate::clock::{Clock, CycleDelay};
+use envelope::Envelope;
+
+mod envelope;
 
 // Awaits a certain number of APU clock cycles (2x CPU cycles)
 macro_rules! cycles {
@@ -10,15 +13,6 @@ macro_rules! cycles {
         let clock = $chip.borrow_mut().clock.clone();
         CycleDelay::new(clock, $n * 6, false).await
     }
-}
-
-struct Envelope {
-    volume: u8,
-    divider: u8,
-    decay: u8,
-    start: bool,
-    constant_vol: bool,
-    loop_flag: bool,
 }
 
 struct Pulse {
@@ -68,60 +62,6 @@ const LENGTH_TABLE: [u8; 32] = [
     12,  16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
 ];
 const DUTY_TABLE: [f32; 4] = [0.125, 0.250, 0.500, 0.750];
-
-impl Envelope {
-    fn new() -> Self {
-        Self {
-            volume: 0,
-            divider: 0,
-            decay: 0,
-            start: false,
-            constant_vol: false,
-            loop_flag: false,
-        }
-    }
-
-    fn set_constant_vol(&mut self, val: bool) {
-        self.constant_vol = val;
-    }
-
-    fn set_start(&mut self) {
-        self.start = true;
-    }
-
-    fn set_volume(&mut self, volume: u8) {
-        self.volume = volume & 0x0f;
-    }
-
-    fn tick(&mut self) {
-        if self.start {
-            self.start = false;
-            self.decay = 15;
-            self.divider = self.volume;
-        } else if self.divider == 0{
-            self.divider = self.volume;
-            self.tick_decay();
-        } else {
-            self.divider -= 1;
-        }
-    }
-
-    fn tick_decay(&mut self) {
-        if self.decay > 0 {
-            self.decay -= 1;
-        } else if self.decay == 0 && self.loop_flag {
-            self.decay = 15;
-        }
-    }
-
-    fn output_volume(&self) -> f32 {
-        (if self.constant_vol {
-            self.volume as f32
-        } else {
-            self.decay as f32
-        }) / 15.0
-    }
-}
 
 impl Pulse {
     fn new(id: usize, interface: AudioInterface) -> Self {
