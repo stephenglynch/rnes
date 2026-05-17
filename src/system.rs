@@ -61,13 +61,13 @@ pub struct Cpu {
     nmi_ff: bool,
     int_ff: bool,
     ram: Vec<u8>,
-    chip: Rc<RefCell<Chip>>,
+    chip: Rc<Chip>,
     ppu: Rc<Ppu>,
     mapper: Rc<RefCell<dyn Mapper>>
 }
 
 impl Cpu {
-    pub fn new(clock: Rc<RefCell<Clock>>, mapper: Rc<RefCell<dyn Mapper>>, chip: Rc<RefCell<Chip>>, ppu: Rc<Ppu>) -> Self {
+    pub fn new(clock: Rc<RefCell<Clock>>, mapper: Rc<RefCell<dyn Mapper>>, chip: Rc<Chip>, ppu: Rc<Ppu>) -> Self {
         let mut cpu = Cpu {
             clock: clock.clone(),
             registers: Registers::new(),
@@ -123,7 +123,7 @@ impl Cpu {
         match mem {
             Memory::Ram => self.ram[loc],
             Memory::Cartridge => self.mapper.borrow_mut().get(loc),
-            Memory::ChipRegs => self.chip.borrow_mut().get_reg(loc),
+            Memory::ChipRegs => self.chip.get_reg(loc),
             Memory::PpuRegs => self.ppu.get_reg(loc),
             Memory::Oam => 0,
         }
@@ -135,7 +135,7 @@ impl Cpu {
             Memory::Ram => self.ram[loc] = val,
 
             Memory::Cartridge => self.mapper.borrow_mut().set(loc, val),
-            Memory::ChipRegs => self.chip.borrow_mut().set_reg(loc, val),
+            Memory::ChipRegs => self.chip.set_reg(loc, val),
             Memory::PpuRegs => self.ppu.set_reg(loc, val),
             Memory::Oam => self.oam_transfer(val).await
         }
@@ -153,7 +153,12 @@ impl Cpu {
         cycles!(self, 2);
     }
 
-    pub async fn run(mut self) {
+    pub fn start(self) {
+        let clock = self.clock.clone();
+        clock.borrow().spawn(self.run());
+    }
+
+    async fn run(mut self) {
         let mut nmi_level = false;
         let mut int_level = false;
         loop {
@@ -166,10 +171,10 @@ impl Cpu {
             }
 
             // Detect INT 'edge' change
-            if self.chip.borrow().int_request() && !int_level {
+            if self.chip.int_request() && !int_level {
                 int_level = true;
                 self.int_ff = true;
-            } else if !self.chip.borrow().int_request() && int_level {
+            } else if !self.chip.int_request() && int_level {
                 int_level = false;
             }
 

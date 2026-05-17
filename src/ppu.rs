@@ -207,6 +207,12 @@ impl Ppu {
         }
     }
 
+    pub fn start(self: Rc<Self>) {
+        let clock = self.clock.clone();
+        let self_clone = self.clone();
+        clock.borrow().spawn(async move { self_clone.run().await });
+    }
+
     fn apply_fine_x_scroll(&self, full_chunk: &[Colour; 16]) -> [Colour; 8] {
         let fine_x = self.x_fine_reg.get() as usize;
         let mut output_chunk = [Colour::new(); 8];
@@ -238,7 +244,7 @@ impl Ppu {
         self.ppu_mask.get().intersects(PpuMask::RENDER_BACKGROUND | PpuMask::RENDER_SPRITES)
     }
 
-    pub async fn run(&self) {
+    async fn run(&self) {
         // Not correctly updating v
         let mut chunk;
         let mut full_chunk = [Colour::new(); 16];

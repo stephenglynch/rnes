@@ -4,10 +4,9 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::thread;
 use futures::executor::LocalPool;
-use futures::task::LocalSpawnExt;
 
 use crate::Config;
-use crate::chip::{Chip, run_chip};
+use crate::chip::Chip;
 use crate::ppu::Ppu;
 use crate::system::Cpu;
 use crate::clock::Clock;
@@ -29,19 +28,20 @@ pub fn execute_rom(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let gamepads = input_manager.get_gamepads();
 
     thread::spawn(move || {
+        // Create "async" pool to handle clock cycles
+        let mut pool = LocalPool::new();
+
         // Build NES components
-        let clock  = Rc::new(RefCell::new(Clock::new(system_control)));
+        let clock  = Rc::new(RefCell::new(Clock::new(system_control, pool.spawner())));
         let mapper  = generate_mapper(config.ines);
-        let chip = Rc::new(RefCell::new(Chip::new(clock.clone(), config.audio, gamepads)));
+        let chip = Rc::new(Chip::new(clock.clone(), config.audio, gamepads));
         let ppu    = Rc::new(Ppu::new(clock.clone(), mapper.clone(), frame_buffer));
         let cpu    = Cpu::new(clock.clone(), mapper, chip.clone(), ppu.clone());
 
-        // Create "async" pool to handle clock cycles
-        let mut pool = LocalPool::new();
-        let spawner = pool.spawner();
-        spawner.spawn_local(cpu.run()).unwrap();
-        spawner.spawn_local(async move { ppu.clone().run().await }).unwrap();
-        spawner.spawn_local(async move { run_chip(chip).await }).unwrap();
+        // Start Async coroutines
+        cpu.start();
+        ppu.start();
+        chip.start();
 
         let now = SystemTime::now();
         // for _ in 0..CYCLES_TO_RUN {

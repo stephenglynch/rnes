@@ -15,14 +15,12 @@ mod triangle;
 // Awaits a certain number of APU clock cycles (2x CPU cycles)
 macro_rules! cycles {
     ($chip:expr, $n:expr) => {
-        let clock = $chip.borrow_mut().clock.clone();
+        let clock = $chip.clock.clone();
         CycleDelay::new(clock, $n * 6, false).await
     }
 }
 
-pub struct Chip {
-    clock: Rc<RefCell<Clock>>,
-    active_gamepads: ActiveGamepads,
+struct ChipState {
     gamepad_fifos: [Vec<u8>; 2],
     pulse1: Pulse,
     pulse2: Pulse,
@@ -30,6 +28,12 @@ pub struct Chip {
     seq_mode: bool,
     int_flag: bool,
     int_set: bool
+}
+
+pub struct Chip {
+    clock: Rc<RefCell<Clock>>,
+    active_gamepads: ActiveGamepads,
+    chip_state: RefCell<ChipState>
 }
 
 impl Chip {
@@ -40,25 +44,33 @@ impl Chip {
         Self {
             clock: clock,
             active_gamepads: active_gamepads,
-            gamepad_fifos: Default::default(),
-            pulse1: pulse1,
-            pulse2: pulse2,
-            triangle: triangle,
-            seq_mode: false,
-            int_flag: false,
-            int_set: false
+            chip_state: RefCell::new(ChipState {
+                gamepad_fifos: Default::default(),
+                pulse1: pulse1,
+                pulse2: pulse2,
+                triangle: triangle,
+                seq_mode: false,
+                int_flag: false,
+                int_set: false
+            })
         }
     }
 
-    fn read_game_pad(&mut self, index: usize) -> u8 {
-        self.gamepad_fifos[index].pop().unwrap_or(0)
+    pub fn start(self: Rc<Self>) {
+        // spawner.spawn_local(async move { run_chip(chip).await }).unwrap();
+        let clock = self.clock.clone();
+        clock.borrow().spawn(async move { run_chip(&self).await });
+    }
+
+    fn read_game_pad(&self, index: usize) -> u8 {
+        self.chip_state.borrow_mut().gamepad_fifos[index].pop().unwrap_or(0)
     }
 
     pub fn int_request(&self) -> bool {
-        self.int_flag
+        self.chip_state.borrow().int_flag
     }
 
-    pub fn get_reg(&mut self, addr: usize) -> u8 {
+    pub fn get_reg(&self, addr: usize) -> u8 {
         match addr {
             0x16 => self.read_game_pad(0),
             0x17 => self.read_game_pad(1),
@@ -66,28 +78,29 @@ impl Chip {
         }
     }
 
-    pub fn set_reg(&mut self, addr: usize, val: u8) {
+    pub fn set_reg(&self, addr: usize, val: u8) {
+        let mut chip_state = self.chip_state.borrow_mut();
         match addr {
             0x00..0x04 => {
-                self.pulse1.set_reg(addr & 0x3, val);
+                chip_state.pulse1.set_reg(addr & 0x3, val);
             },
             0x04..0x08 => {
-                self.pulse2.set_reg(addr & 0x3, val);
+                chip_state.pulse2.set_reg(addr & 0x3, val);
             },
             0x15 => {
-                self.pulse1.length_counter.set_enabled(val & 0x01 != 0);
-                self.pulse2.length_counter.set_enabled(val & 0x02 != 0);
-                self.triangle.length_counter.set_enabled(val & 0x04 != 0);
+                chip_state.pulse1.length_counter.set_enabled(val & 0x01 != 0);
+                chip_state.pulse2.length_counter.set_enabled(val & 0x02 != 0);
+                chip_state.triangle.length_counter.set_enabled(val & 0x04 != 0);
             },
             0x08..0x0c => {
-                self.triangle.set_reg(addr & 0x3, val);
+                chip_state.triangle.set_reg(addr & 0x3, val);
             },
             0x16 => {
                 if val & 0x01 != 0 {
                     let sampled = self.active_gamepads.lock().unwrap();
-                    for i in 0..self.gamepad_fifos.len() {
+                    for i in 0..chip_state.gamepad_fifos.len() {
                         if let Some((_, state)) = sampled.get(i) {
-                            let fifo = &mut self.gamepad_fifos[i];
+                            let fifo = &mut chip_state.gamepad_fifos[i];
                             fifo.clear();
                             fifo.extend_from_slice(&state.serialise());
                         }
@@ -95,11 +108,11 @@ impl Chip {
                 }
             }, // Start strobe
             0x17 => {
-                self.seq_mode = 0x80 & val != 0;
-                self.int_flag = 0x40 & val != 0;
+                chip_state.seq_mode = 0x80 & val != 0;
+                chip_state.int_flag = 0x40 & val != 0;
                 // Clear interrupt if interrupt inhibit is set
-                if self.int_flag {
-                    self.int_set = false;
+                if chip_state.int_flag {
+                    chip_state.int_set = false;
                 }
             }
             _ => () // Do nothing
@@ -107,44 +120,45 @@ impl Chip {
     }
 }
 
-pub async fn run_chip(chip: Rc<RefCell<Chip>>) {
+pub async fn run_chip(chip: &Chip) {
+    let chip_state = &chip.chip_state;
     loop {
         // Step 1
         cycles!(chip, 3728);
-        chip.borrow_mut().pulse1.envelope.tick();
-        chip.borrow_mut().pulse2.envelope.tick();
-        chip.borrow_mut().triangle.tick_linear_counter();
+        chip_state.borrow_mut().pulse1.envelope.tick();
+        chip_state.borrow_mut().pulse2.envelope.tick();
+        chip_state.borrow_mut().triangle.tick_linear_counter();
 
         // Step 2
         cycles!(chip, 3728);
-        chip.borrow_mut().pulse1.envelope.tick();
-        chip.borrow_mut().pulse2.envelope.tick();
-        chip.borrow_mut().triangle.tick_linear_counter();
-        chip.borrow_mut().pulse1.tick();
-        chip.borrow_mut().pulse2.tick();
-        chip.borrow_mut().triangle.tick_length_counter();
+        chip_state.borrow_mut().pulse1.envelope.tick();
+        chip_state.borrow_mut().pulse2.envelope.tick();
+        chip_state.borrow_mut().triangle.tick_linear_counter();
+        chip_state.borrow_mut().pulse1.tick();
+        chip_state.borrow_mut().pulse2.tick();
+        chip_state.borrow_mut().triangle.tick_length_counter();
 
         // Step 3
-        chip.borrow_mut().pulse1.envelope.tick();
-        chip.borrow_mut().pulse2.envelope.tick();
-        chip.borrow_mut().triangle.tick_linear_counter();
+        chip_state.borrow_mut().pulse1.envelope.tick();
+        chip_state.borrow_mut().pulse2.envelope.tick();
+        chip_state.borrow_mut().triangle.tick_linear_counter();
         cycles!(chip, 3729);
 
         // Step 4
         cycles!(chip, 3729);
-        if !chip.borrow().seq_mode {
-            chip.borrow_mut().int_set = true;
+        if !chip_state.borrow().seq_mode {
+            chip_state.borrow_mut().int_set = true;
         }
 
         // Step 4/5
-        if chip.borrow().seq_mode {
+        if chip_state.borrow().seq_mode {
             cycles!(chip, 3726);
         }
-        chip.borrow_mut().pulse1.envelope.tick();
-        chip.borrow_mut().pulse2.envelope.tick();
-        chip.borrow_mut().triangle.tick_linear_counter();
-        chip.borrow_mut().pulse1.tick();
-        chip.borrow_mut().pulse2.tick();
-        chip.borrow_mut().triangle.tick_length_counter();
+        chip_state.borrow_mut().pulse1.envelope.tick();
+        chip_state.borrow_mut().pulse2.envelope.tick();
+        chip_state.borrow_mut().triangle.tick_linear_counter();
+        chip_state.borrow_mut().pulse1.tick();
+        chip_state.borrow_mut().pulse2.tick();
+        chip_state.borrow_mut().triangle.tick_length_counter();
     }
 }

@@ -7,6 +7,9 @@ use std::pin::Pin;
 use std::time::{Instant, Duration};
 use std::thread::sleep;
 use std::sync::Arc;
+use futures::executor::LocalSpawner;
+use futures::task::LocalSpawnExt;
+
 use crate::system_control::SystemControl;
 
 const CYCLE_PERIOD: Duration = Duration::from_nanos(186);
@@ -21,18 +24,27 @@ pub struct Clock {
     last_catchup_cycle: u64,
     // Tasks waiting for a specific cycle to pass
     sleepers: BTreeMap<u64, Vec<Sleeper>>,
-    system_control: Arc<SystemControl>
+    system_control: Arc<SystemControl>,
+    spawner: LocalSpawner
 }
 
 impl Clock {
-    pub fn new(system_control: Arc<SystemControl>) -> Self {
+    pub fn new(system_control: Arc<SystemControl>, spawner: LocalSpawner) -> Self {
         Clock {
             current_cycle: 3 * 7, // The starting cycle number for the CPU
             last_catchup_time: Instant::now(),
             last_catchup_cycle: 0,
             sleepers: BTreeMap::new(), // TODO: This generates expensive heap allocations and is bottle necking performance
-            system_control: system_control
+            system_control: system_control,
+            spawner: spawner
         }
+    }
+
+    pub fn spawn<Fut>(&self, future: Fut)
+    where
+        Fut: Future<Output = ()> + 'static,
+    {
+        let _ = self.spawner.spawn_local(future);
     }
 
     pub fn tick(&mut self) {
