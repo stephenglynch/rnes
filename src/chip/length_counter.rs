@@ -42,6 +42,6 @@ impl LengthCounter {
     }
 
     pub fn get_enabled(&self) -> bool {
-        self.enabled
+        self.enabled && self.length > 0
     }
 }

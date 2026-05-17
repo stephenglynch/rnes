@@ -72,6 +72,13 @@ impl Chip {
 
     pub fn get_reg(&self, addr: usize) -> u8 {
         match addr {
+            0x15 => {
+                let chip_state = self.chip_state.borrow();
+                ((chip_state.pulse1.length_counter.get_enabled() as u8) << 0) |
+                ((chip_state.pulse2.length_counter.get_enabled() as u8) << 1) |
+                ((chip_state.triangle.length_counter.get_enabled() as u8) << 1)
+                // TODO: ((chip_state.noise.length_counter.get_enabled() as u8) << 1)
+            }
             0x16 => self.read_game_pad(0),
             0x17 => self.read_game_pad(1),
             _ => 0 // Do nothing
