@@ -1,4 +1,4 @@
-use std::sync::mpsc::{Sender, Receiver, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     Device, FromSample, I24, Sample, SizedSample, Stream, SupportedStreamConfig
@@ -6,6 +6,49 @@ use cpal::{
 use filter::LowPassFilter;
 
 mod filter;
+
+pub struct NesSample {
+    pub volume: f32,
+    pub duration: f32
+}
+
+pub struct NesStream {
+    current: Option<NesSample>,
+    stream: Receiver<NesSample>
+}
+
+impl NesStream {
+    fn new(rx: Receiver<NesSample>) -> Self {
+        NesStream { current: None, stream: rx }
+    }
+
+    fn next_sample(&mut self, sample_time: f32) -> Option<f32> {
+        let mut sample_time_left = 0.0;
+        if let Some(nes_sample) = &mut self.current {
+            nes_sample.duration -= sample_time;
+            if nes_sample.duration >= 0.0 {
+                return Some(nes_sample.volume);
+            } else {
+                // Not enough time remaining in current sample discard, and use
+                // remaining time into the next sample
+                sample_time_left = -nes_sample.duration;
+            }
+        } else {
+            if let Ok(nes_sample) = self.stream.try_recv() {
+                self.current = Some(nes_sample);
+                return self.next_sample(sample_time);
+            }
+        }
+        // Recurse into the next sample if the current sample is not long enough
+        if sample_time_left > 0.0 {
+            self.current = self.stream.try_recv().ok();
+            return self.next_sample(sample_time_left);
+        }
+        None
+    }
+}
+
+type Sound = NesSample;
 
 pub struct Audio {
     device: Device,
@@ -19,43 +62,6 @@ pub struct AudioInterface {
 
 struct OutputFilter {
     low_pass: filter::LowPassFilter
-}
-
-#[derive(Clone, PartialEq)]
-pub enum Sound {
-    None,
-    SquareWave {
-        period: f32,
-        duty: f32,
-        volume: f32
-    },
-    TriangleWave {
-        period: f32,
-    }
-}
-
-fn gen_sound(sound: &Sound, sample: f32, sample_rate: f32) -> (f32, f32) {
-    match *sound {
-        Sound::None => (0.0, 0.0),
-        Sound::SquareWave { period, duty , volume} => {
-            square_wave(period, duty, volume, sample, sample_rate)
-        }
-        Sound::TriangleWave { period} => {
-            triangle_wave(period, sample, sample_rate)
-        }
-    }
-}
-
-fn square_wave(period: f32, duty: f32, volume: f32, sample: f32, sample_rate: f32) -> (f32, f32) {
-    let t = (sample / sample_rate) % period;
-    let volume = 0.1128 * volume;
-    if t < duty * period {
-        (sample + 1.0, volume)
-    } else if t < period {
-        (sample + 1.0, -volume)
-    } else {
-        (0.0, volume)
-    }
 }
 
 const fn generate_triangle_lut() -> [f32; 32] {
@@ -73,15 +79,37 @@ const fn generate_triangle_lut() -> [f32; 32] {
     lut
 }
 
-fn triangle_wave(period: f32, sample: f32, sample_rate: f32) -> (f32, f32) {
-    let t: f32 = (sample / sample_rate) % period;
-    let lut = generate_triangle_lut();
-    let lut_i = (t / period * 32.0) as usize;
+pub struct TriangleWave {
+    sample_rate: f32,
+    sample: f32,
+    period: f32
+}
+impl TriangleWave {
+    fn gen_sound(&mut self) -> f32 {
+        let t: f32 = (self.sample / self.sample_rate) % self.period;
+        let lut = generate_triangle_lut();
+        let lut_i = (t / self.period * 32.0) as usize;
 
-    if lut_i < 32 {
-        (sample + 1.0, lut[lut_i])
-    } else {
-        (1.0, lut[lut_i])
+        if lut_i < 32 {
+            self.sample += 1.0;
+            lut[lut_i]
+        } else {
+            self.sample = 1.0;
+            lut[lut_i]
+        }
+    }
+}
+
+pub struct Noise {
+    sample_rate: f32,
+    sample: f32,
+    mode: bool,
+    period: u8,
+    volume: f32
+}
+impl Noise {
+    fn gen_sound(&mut self) -> f32 {
+        0.0
     }
 }
 
@@ -129,25 +157,25 @@ impl Audio {
         })
     }
 
-    pub fn create_interface(&self) -> anyhow::Result<AudioInterface>  {
+    pub fn create_interface(&self, id: usize) -> anyhow::Result<AudioInterface>  {
         let (tx, rx) = channel();
         let sample_rate = self.config.sample_rate() as f32;
         let filter = OutputFilter::new(sample_rate);
         let stream = match self.config.sample_format() {
-            cpal::SampleFormat::I8 => self.run::<i8>(rx, filter),
-            cpal::SampleFormat::I16 => self.run::<i16>(rx, filter),
-            cpal::SampleFormat::I24 => self.run::<I24>(rx, filter),
-            cpal::SampleFormat::I32 => self.run::<i32>(rx, filter),
-            // cpal::SampleFormat::I48 => self.run::<I48>(rx, filter),
-            cpal::SampleFormat::I64 => self.run::<i64>(rx, filter),
-            cpal::SampleFormat::U8 => self.run::<u8>(rx, filter),
-            cpal::SampleFormat::U16 => self.run::<u16>(rx, filter),
-            // cpal::SampleFormat::U24 => self.run::<U24>(rx, filter),
-            cpal::SampleFormat::U32 => self.run::<u32>(rx, filter),
-            // cpal::SampleFormat::U48 => self.run::<U48>(rx, filter),
-            cpal::SampleFormat::U64 => self.run::<u64>(rx, filter),
-            cpal::SampleFormat::F32 => self.run::<f32>(rx, filter),
-            cpal::SampleFormat::F64 => self.run::<f64>(rx, filter),
+            cpal::SampleFormat::I8 => self.run::<i8>(id, rx, filter),
+            cpal::SampleFormat::I16 => self.run::<i16>(id, rx, filter),
+            cpal::SampleFormat::I24 => self.run::<I24>(id, rx, filter),
+            cpal::SampleFormat::I32 => self.run::<i32>(id, rx, filter),
+            // cpal::SampleFormat::I48 => self.run::<I48>(id, rx, filter),
+            cpal::SampleFormat::I64 => self.run::<i64>(id, rx, filter),
+            cpal::SampleFormat::U8 => self.run::<u8>(id, rx, filter),
+            cpal::SampleFormat::U16 => self.run::<u16>(id, rx, filter),
+            // cpal::SampleFormat::U24 => self.run::<U24>(id, rx, filter),
+            cpal::SampleFormat::U32 => self.run::<u32>(id, rx, filter),
+            // cpal::SampleFormat::U48 => self.run::<U48>(id, rx, filter),
+            cpal::SampleFormat::U64 => self.run::<u64>(id, rx, filter),
+            cpal::SampleFormat::F32 => self.run::<f32>(id, rx, filter),
+            cpal::SampleFormat::F64 => self.run::<f64>(id, rx, filter),
             sample_format => panic!("Unsupported sample format '{sample_format}'"),
         }?;
 
@@ -157,7 +185,7 @@ impl Audio {
         })
     }
 
-    fn run<T>(&self, rx: Receiver<Sound>, mut filter: OutputFilter) -> Result<Stream, anyhow::Error>
+    fn run<T>(&self, _id: usize, rx: Receiver<Sound>, mut filter: OutputFilter) -> Result<Stream, anyhow::Error>
     where
         T: SizedSample + FromSample<f32>,
     {
@@ -165,22 +193,12 @@ impl Audio {
         let sample_rate = config.sample_rate as f32;
         let channels = config.channels as usize;
 
-        // Generate sound
-        let mut wave_sample = 0.0;
-        // let mut duration_s = LENGTH_TICK;
-        let mut sound = Sound::None;
+        println!("sample_rate = {}", sample_rate);
+        let sample_time = 1.0 / sample_rate;
+
+        let mut nes_stream = NesStream::new(rx);
         let mut next_value = move || {
-            if let Ok(new_sound) = rx.try_recv() {
-                if new_sound != sound {
-                    sound = new_sound;
-                    // TODO: this sounds better but may need more thought
-                    // wave_sample = 0.0;
-                }
-            }
-            let (next_sample, val) = gen_sound(&sound, wave_sample, sample_rate);
-            let val = filter.apply(val);
-            wave_sample = next_sample;
-            val
+            nes_stream.next_sample(sample_time).unwrap_or_default()
         };
 
         let err_fn = |err| eprintln!("an error occurred on stream: {err}");
