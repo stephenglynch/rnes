@@ -4,13 +4,13 @@ use crate::audio::Audio;
 use crate::input::ActiveGamepads;
 use crate::clock::{Clock, CycleDelay};
 use pulse::Pulse;
-// use triangle::Triangle;
+use triangle::Triangle;
 
 mod constants;
 mod length_counter;
 mod envelope;
 mod pulse;
-// mod triangle;
+mod triangle;
 
 // Awaits a certain number of APU clock cycles (2x CPU cycles)
 macro_rules! cycles {
@@ -31,7 +31,7 @@ pub struct Chip {
     clock: Rc<RefCell<Clock>>,
     pulse1: Rc<Pulse>,
     pulse2: Rc<Pulse>,
-    // triangle: Triangle,
+    triangle: Rc<Triangle>,
     active_gamepads: ActiveGamepads,
     chip_state: RefCell<ChipState>
 }
@@ -40,12 +40,12 @@ impl Chip {
     pub fn new(clock: Rc<RefCell<Clock>>, audio: Audio, active_gamepads: ActiveGamepads) -> Self {
         let pulse1 = Pulse::new(1, audio.create_interface(1).unwrap(), clock.clone(), false);
         let pulse2 = Pulse::new(2, audio.create_interface(2).unwrap(), clock.clone(), false);
-        // let triangle = Triangle::new(audio.create_interface().unwrap(), false);
+        let triangle = Triangle::new(audio.create_interface(3).unwrap(), clock.clone(), false);
         Self {
             clock: clock,
             pulse1: Rc::new(pulse1),
             pulse2: Rc::new(pulse2),
-            // triangle: triangle,
+            triangle: Rc::new(triangle),
             active_gamepads: active_gamepads,
             chip_state: RefCell::new(ChipState {
                 gamepad_fifos: Default::default(),
@@ -59,6 +59,7 @@ impl Chip {
     pub fn start(self: Rc<Self>) {
         self.pulse1.clone().start();
         self.pulse2.clone().start();
+        self.triangle.clone().start();
         let clock = self.clock.clone();
         let chip = self.clone();
         clock.borrow().spawn(async move {
@@ -68,21 +69,21 @@ impl Chip {
                 cycles!(chip, 3728);
                 chip.pulse1.tick_envelope();
                 chip.pulse2.tick_envelope();
-                // chip_state.borrow_mut().triangle.tick_linear_counter();
+                chip.triangle.tick_linear_counter();
 
                 // Step 2
                 cycles!(chip, 3728);
                 chip.pulse1.tick_envelope();
                 chip.pulse2.tick_envelope();
-                // chip_state.borrow_mut().triangle.tick_linear_counter();
+                chip.triangle.tick_linear_counter();
                 chip.pulse1.tick_length();
                 chip.pulse2.tick_length();
-                // chip_state.borrow_mut().triangle.tick_length_counter();
+                chip.triangle.tick_length();
 
                 // Step 3
                 chip.pulse1.tick_envelope();
                 chip.pulse2.tick_envelope();
-                // chip_state.borrow_mut().triangle.tick_linear_counter();
+                chip.triangle.tick_linear_counter();
                 cycles!(chip, 3729);
 
                 // Step 4
@@ -97,10 +98,10 @@ impl Chip {
                 }
                 chip.pulse1.tick_envelope();
                 chip.pulse2.tick_envelope();
-                // chip_state.borrow_mut().triangle.tick_linear_counter();
+                chip.triangle.tick_linear_counter();
                 chip.pulse1.tick_length();
                 chip.pulse2.tick_length();
-                // chip_state.borrow_mut().triangle.tick_length_counter();
+                chip.triangle.tick_length();
             }
         });
     }
@@ -117,8 +118,8 @@ impl Chip {
         match addr {
             0x15 => {
                 ((self.pulse1.get_enabled() as u8) << 0) |
-                ((self.pulse2.get_enabled() as u8) << 1)
-                // ((chip_state.triangle.length_counter.get_enabled() as u8) << 1)
+                ((self.pulse2.get_enabled() as u8) << 1) |
+                ((self.triangle.get_enabled() as u8) << 1)
                 // TODO: ((chip_state.noise.length_counter.get_enabled() as u8) << 1)
             }
             0x16 => self.read_game_pad(0),
@@ -139,10 +140,10 @@ impl Chip {
             0x15 => {
                 self.pulse1.set_enabled(val & 0x01 != 0);
                 self.pulse2.set_enabled(val & 0x02 != 0);
-                // chip_state.triangle.set_enabled(val & 0x04 != 0);
+                self.triangle.set_enabled(val & 0x04 != 0);
             },
             0x08..0x0c => {
-                // chip_state.triangle.set_reg(addr & 0x3, val);
+                self.triangle.set_reg(addr & 0x3, val);
             },
             0x16 => {
                 if val & 0x01 != 0 {

@@ -25,8 +25,8 @@ bitflags! {
 pub struct INes {
     pub prg_rom: Vec<u8>,
     pub mapper: u16,
-    pub submapper: u8,
-    pub trainer: Option<Vec<u8>>,
+    pub _submapper: u8,
+    pub _trainer: Option<Vec<u8>>,
     pub chr_rom: Option<Vec<u8>>,
     pub vertical_mirroring: bool
 }
@@ -91,8 +91,8 @@ pub fn read_ines(filename: &Path) -> Option<INes> {
     Some(INes {
         prg_rom: prg_rom,
         mapper: mapper,
-        submapper: submapper,
-        trainer: trainer,
+        _submapper: submapper,
+        _trainer: trainer,
         chr_rom: chr_rom,
         vertical_mirroring: vertical_mirroring
     })

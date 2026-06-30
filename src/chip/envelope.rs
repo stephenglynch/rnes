@@ -57,6 +57,6 @@ impl Envelope {
             self.volume as f32
         } else {
             self.decay as f32
-        }) / 15.0
+        }) * 0.00752
     }
 }

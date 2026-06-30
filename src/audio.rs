@@ -64,55 +64,6 @@ struct OutputFilter {
     low_pass: filter::LowPassFilter
 }
 
-const fn generate_triangle_lut() -> [f32; 32] {
-    let volume = 0.00851;
-    let mut lut = [0.0; 32];
-    let mut i = 0;
-    let raw = [
-        15, 14, 13, 12, 11, 10,  9,  8,  7,  6,  5,  4,  3,  2,  1,  0,
-        0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15
-    ];
-    while i < 32 {
-        lut[i] = (raw[i] as f32) * volume;
-        i += 1;
-    }
-    lut
-}
-
-pub struct TriangleWave {
-    sample_rate: f32,
-    sample: f32,
-    period: f32
-}
-impl TriangleWave {
-    fn gen_sound(&mut self) -> f32 {
-        let t: f32 = (self.sample / self.sample_rate) % self.period;
-        let lut = generate_triangle_lut();
-        let lut_i = (t / self.period * 32.0) as usize;
-
-        if lut_i < 32 {
-            self.sample += 1.0;
-            lut[lut_i]
-        } else {
-            self.sample = 1.0;
-            lut[lut_i]
-        }
-    }
-}
-
-pub struct Noise {
-    sample_rate: f32,
-    sample: f32,
-    mode: bool,
-    period: u8,
-    volume: f32
-}
-impl Noise {
-    fn gen_sound(&mut self) -> f32 {
-        0.0
-    }
-}
-
 impl OutputFilter {
     fn new(sample_period: f32) -> Self {
         Self {
@@ -198,7 +149,8 @@ impl Audio {
 
         let mut nes_stream = NesStream::new(rx);
         let mut next_value = move || {
-            nes_stream.next_sample(sample_time).unwrap_or_default()
+            let sample = nes_stream.next_sample(sample_time).unwrap_or_default();
+            filter.apply(sample)
         };
 
         let err_fn = |err| eprintln!("an error occurred on stream: {err}");
