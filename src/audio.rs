@@ -3,7 +3,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     Device, FromSample, I24, Sample, SizedSample, Stream, SupportedStreamConfig
 };
-use filter::LowPassFilter;
+use filter::{LowPassFilter, HighPassFilter};
 
 mod filter;
 
@@ -61,18 +61,21 @@ pub struct AudioInterface {
 }
 
 struct OutputFilter {
-    low_pass: filter::LowPassFilter
+    low_pass: filter::LowPassFilter,
+    high_pass: filter::HighPassFilter,
 }
 
 impl OutputFilter {
     fn new(sample_period: f32) -> Self {
         Self {
-            low_pass: LowPassFilter::new(sample_period, 14e3) // 14 kHz
+            low_pass: LowPassFilter::new(sample_period, 14e3),    // 14 kHz
+            high_pass:  HighPassFilter::new(sample_period, 90.0)  // 90 Hz
         }
     }
 
     fn apply(&mut self, x: f32) -> f32 {
         let y = self.low_pass.apply(x);
+        let y = self.high_pass.apply(y);
         y
     }
 }
