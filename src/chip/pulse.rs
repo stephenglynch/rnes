@@ -61,10 +61,10 @@ impl Pulse {
     async fn next_output(&self) {
         let timer_cycles = self.timer.get() + 1;
         let output_table = [
-            [0, 1, 0, 0, 0, 0, 0, 0],
-            [0, 1, 1, 0, 0, 0, 0, 0],
-            [0, 1, 1, 1, 1, 0, 0, 0],
-            [1, 0, 0, 1, 1, 1, 1, 1],
+            [-1,  1, -1, -1, -1, -1, -1, -1],
+            [-1,  1,  1, -1, -1, -1, -1, -1],
+            [-1,  1,  1,  1,  1, -1, -1, -1],
+            [ 1, -1, -1,  1,  1,  1,  1,  1],
         ];
         if !self.muted && self.length_counter.borrow().unmuted() && self.timer.get() >= 8 {
             let duty_val = output_table[self.duty.get() as usize][self.output_i.get()] as f32;
