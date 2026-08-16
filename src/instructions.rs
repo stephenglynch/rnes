@@ -514,6 +514,33 @@ async fn rti(sys: &mut Cpu) {
     cycles!(sys, 6);
 }
 
+// Unofficial / Illegal
+
+async fn sbx<A: AddrMode + Default, D: Dest<A>, R: Source<A>, S: Source<A>>(sys: &mut Cpu) {
+    let mut addr_mode = A::default();
+    let val = R::get(sys, &mut addr_mode) & sys.registers.ac;
+    let operand = S::get(sys, &mut addr_mode);
+    let result = val.wrapping_sub(operand);
+    match val.cmp(&operand) {
+        Ordering::Less => {
+            sys.registers.sr.set(StatusRegister::ZERO, false);
+            sys.registers.sr.set(StatusRegister::CARRY, false);
+        },
+        Ordering::Equal => {
+            sys.registers.sr.set(StatusRegister::ZERO, true);
+            sys.registers.sr.set(StatusRegister::CARRY, true);
+        },
+        Ordering::Greater => {
+            sys.registers.sr.set(StatusRegister::ZERO, false);
+            sys.registers.sr.set(StatusRegister::CARRY, true);
+        }
+    }
+    update_negative_status(sys, result);
+    D::set(sys, &mut addr_mode, result).await;
+    bump_pc::<A>(sys);
+    cycles!(sys, addr_mode.cycles(AccessType::ReadModifyWrite));
+}
+
 pub async fn execute(sys: &mut Cpu, instruction: u8) {
     match instruction {
         0x00 => brk(sys).await,
@@ -637,6 +664,7 @@ pub async fn execute(sys: &mut Cpu, instruction: u8) {
         0xC8 => incr::<Implied, dest::IndexY, source::IndexY>(sys).await,
         0xC9 => cp::<Immediate, source::Accumulator, source::Memory>(sys).await,
         0xCA => decr::<Implied, dest::IndexX, source::IndexX>(sys).await,
+        0xCB => sbx::<Immediate, dest::IndexX, source::IndexX, source::Memory>(sys).await,
         0xCC => cp::<Absolute, source::IndexY, source::Memory>(sys).await,
         0xCD => cp::<Absolute, source::Accumulator, source::Memory>(sys).await,
         0xCE => decr::<Absolute, dest::Memory, source::Memory>(sys).await,
