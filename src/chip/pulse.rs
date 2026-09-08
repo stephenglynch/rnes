@@ -82,7 +82,7 @@ impl Pulse {
     }
 
     pub fn tick_envelope(&self) {
-        self.length_counter.borrow_mut().tick();
+        self.envelope.borrow_mut().tick();
     }
 
     pub fn get_enabled(&self) -> bool {

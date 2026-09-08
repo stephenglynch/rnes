@@ -36,7 +36,7 @@ impl Envelope {
             self.start = false;
             self.decay = 15;
             self.divider = self.volume;
-        } else if self.divider == 0{
+        } else if self.divider == 0 {
             self.divider = self.volume;
             self.tick_decay();
         } else {
