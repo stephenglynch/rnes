@@ -11,6 +11,7 @@ mod length_counter;
 mod envelope;
 mod pulse;
 mod triangle;
+mod sweep;
 
 // Awaits a certain number of APU clock cycles (2x CPU cycles)
 macro_rules! cycles {
