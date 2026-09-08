@@ -36,7 +36,7 @@ impl LengthCounter {
 
     pub fn set_enabled(&mut self, val: bool) {
         self.enabled = val;
-        if val {
+        if !val {
             self.length = 0;
         }
     }

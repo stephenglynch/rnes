@@ -81,10 +81,10 @@ impl Chip {
                 chip.triangle.tick_length();
 
                 // Step 3
+                cycles!(chip, 3729);
                 chip.pulse1.tick_envelope();
                 chip.pulse2.tick_envelope();
                 chip.triangle.tick_linear_counter();
-                cycles!(chip, 3729);
 
                 // Step 4
                 cycles!(chip, 3729);
